@@ -1,7 +1,7 @@
 """Web dashboard (Vercel entrypoint: Vercel looks for a FastAPI instance named `app` here).
 
-Every page needs HTTP Basic auth with APP_PASSWORD (any username), because a run
-spends Anthropic credit. Each domain runs in its own request so one request stays
+If APP_PASSWORD is set, every page needs HTTP Basic auth (any username + that
+password). If it is not set, the dashboard is open to anyone with the URL. Each domain runs in its own request so one request stays
 well inside the function time limit; the browser walks the list.
 """
 import os
@@ -27,7 +27,7 @@ MAX_DOMAINS = 15  # the case: 8-15 companies a week
 def require_auth(creds: HTTPBasicCredentials = Depends(basic)) -> None:
     password = os.getenv("APP_PASSWORD", "")
     if not password:
-        raise HTTPException(503, "APP_PASSWORD is not set on the server, so the dashboard is locked.")
+        return  # open dashboard (owner's choice); set APP_PASSWORD to lock it
     if creds is None or not secrets.compare_digest(creds.password.encode(), password.encode()):
         raise HTTPException(401, "Sign in with any username and the APP_PASSWORD.",
                             headers={"WWW-Authenticate": 'Basic realm="outreach"'})
@@ -43,7 +43,7 @@ def healthz():
         store_ok = f"error: {type(e).__name__}"
     return {"ok": True, "store": "postgres" if s.database_url else "files", "store_ok": store_ok,
             "app_password_set": bool(os.getenv("APP_PASSWORD")),
-            "anthropic_key": bool(s.anthropic_api_key), "recipient": HARDCODED_RECIPIENT,
+            "llm_provider": s.provider, "llm_key_set": s.llm_ready, "recipient": HARDCODED_RECIPIENT,
             "prompt_version": PROMPT_VERSION}
 
 
@@ -51,7 +51,7 @@ def healthz():
 def home():
     s = load_settings()
     runs = open_store(s).list_runs()
-    return web.home(runs, can_run=bool(s.anthropic_api_key), steps=IMPLEMENTED_STEPS)
+    return web.home(runs, can_run=s.llm_ready, steps=IMPLEMENTED_STEPS)
 
 
 class NewRun(BaseModel):
@@ -71,7 +71,7 @@ def create_run(body: NewRun):
         raise HTTPException(400, f"Give 1-{MAX_DOMAINS} domains")
     s = load_settings()
     store = open_store(s)
-    store.write_manifest(domains, {"model": s.model, "extract_model": s.extract_model,
+    store.write_manifest(domains, {**s.models_summary,
                                    "prompt_version": PROMPT_VERSION, "recipient": HARDCODED_RECIPIENT,
                                    "until": body.until, "source": "web"})
     return {"run_id": store.run_id, "domains": domains}
@@ -90,7 +90,7 @@ def run_domain(run_id: str, domain: str, until: str = "qualify"):
     try:
         pipe = build_pipeline(s, store, until=until)
     except Exception as e:
-        raise HTTPException(503, f"Cannot create the Anthropic client: {e}")
+        raise HTTPException(503, f"Cannot create the LLM client: {e}")
     res = pipe.run_domain(domain, until)
     q = res.get("qualification")
     return {"domain": domain, "steps": {k: str(v) for k, v in res["steps"].items()},

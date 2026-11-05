@@ -156,9 +156,9 @@ def test_web_requires_password(client):
     assert client.get("/healthz").json()["ok"] is True
 
 
-def test_web_locked_without_password(client, monkeypatch):
+def test_web_open_without_password(client, monkeypatch):
     monkeypatch.delenv("APP_PASSWORD")
-    assert client.get("/", auth=("x", "pw")).status_code == 503
+    assert client.get("/").status_code == 200
 
 
 def test_web_creates_run_and_renders_trace(client, tmp_path):
@@ -180,3 +180,55 @@ def test_web_creates_run_and_renders_trace(client, tmp_path):
 def test_web_rejects_too_many_domains(client):
     r = client.post("/api/runs", json={"domains": [f"d{i}.com" for i in range(16)]}, auth=("x", "pw"))
     assert r.status_code == 400
+
+
+# ---- Gemini client (mocked HTTP) ----
+
+import httpx  # noqa: E402
+
+from outreach.extract import _Extraction  # noqa: E402
+from outreach.llm import GeminiLLM, LLMError, gemini_schema  # noqa: E402
+
+
+def test_gemini_schema_inlines_refs_and_nullables():
+    sch = gemini_schema(_Extraction)
+    assert "$defs" not in str(sch) and "$ref" not in str(sch)
+    assert sch["properties"]["is_saas"]["properties"]["value"]["type"] == ["string", "null"]
+    assert sch["additionalProperties"] is False
+
+
+def _gemini(handler):
+    return GeminiLLM("k", "gemini-test", http=httpx.Client(transport=httpx.MockTransport(handler)))
+
+
+def test_gemini_structured_parses_json_and_records_usage():
+    seen = {}
+
+    def handler(req):
+        seen["key"] = req.headers["x-goog-api-key"]
+        seen["body"] = req.read()
+        out = _Scores(scores=[_Score(criterion_id="is_saas", status="met", reason="r", supporting_fields=[])])
+        return httpx.Response(200, json={"candidates": [{"finishReason": "STOP", "content": {"parts": [
+            {"text": "thinking...", "thought": True}, {"text": out.model_dump_json()}]}}],
+            "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5}, "modelVersion": "gemini-test-001"})
+    parsed, meta = _gemini(handler).structured(system="s", user="u", output_model=_Scores)
+    assert parsed.scores[0].status == "met" and meta["model"] == "gemini-test-001" and meta["input_tokens"] == 10
+    assert seen["key"] == "k" and b"responseJsonSchema" in seen["body"] and b"systemInstruction" in seen["body"]
+
+
+@pytest.mark.parametrize("resp,msg", [
+    (httpx.Response(403, json={"error": {"message": "bad key"}}), "authentication"),
+    (httpx.Response(429, json={}), "rate limit"),
+    (httpx.Response(200, json={"promptFeedback": {"blockReason": "SAFETY"}}), "blocked"),
+    (httpx.Response(200, json={"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": []}}]}), "max"),
+])
+def test_gemini_errors_are_clear(resp, msg):
+    with pytest.raises(LLMError, match=msg):
+        _gemini(lambda req: resp).structured(system="s", user="u", output_model=_Scores)
+
+
+def test_provider_defaults_to_gemini_when_key_present(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    s = load_settings()
+    assert s.provider == "gemini" and s.llm_ready

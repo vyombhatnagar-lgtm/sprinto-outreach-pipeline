@@ -39,12 +39,13 @@ def cmd_doctor(_args) -> int:
         failures += 1
 
     print(OK, f"recipient hardcoded -> {HARDCODED_RECIPIENT}")
-    print(OK, f"models -> qualify {s.model}, extract {s.extract_model}   prompt_version -> {PROMPT_VERSION}")
+    m = s.models_summary
+    print(OK if s.llm_ready else WARN, f"LLM {m['provider']}: qualify {m['model']}, extract {m['extract_model']}, "
+          f"key {'set' if s.llm_ready else 'missing'}   prompt_version -> {PROMPT_VERSION}")
     print(OK, "trace store -> " + ("Postgres (DATABASE_URL)" if s.database_url else f"files in {s.runs_dir}"))
     print(OK if not s.review_before_send else WARN,
           f"review_before_send={s.review_before_send} (case wants no manual decisions)")
 
-    print(OK if s.anthropic_api_key else WARN, "ANTHROPIC_API_KEY " + ("set" if s.anthropic_api_key else "missing (needed from Phase 1)"))
     print(OK if s.hunter_api_key else WARN, "HUNTER_API_KEY " + ("set" if s.hunter_api_key else "missing (needed in Phase 3, or use data/manual_pocs.json)"))
 
     if s.gmail_mode == "oauth":
@@ -117,14 +118,14 @@ def cmd_run(args) -> int:
     s = load_settings()
     domains = read_domains_file(Path(args.domains))
     store = open_store(s)
-    store.write_manifest(domains, {"model": s.model, "extract_model": s.extract_model,
+    store.write_manifest(domains, {**s.models_summary,
                                    "prompt_version": PROMPT_VERSION, "recipient": HARDCODED_RECIPIENT,
                                    "until": args.until})
     try:
         pipe = build_pipeline(s, store, until=args.until)
     except Exception as e:
-        print(f"Cannot create the Anthropic client ({e}).\n"
-              "Set ANTHROPIC_API_KEY in .env, or run with --until scrape.")
+        print(f"Cannot create the LLM client ({e}).\n"
+              "Set GEMINI_API_KEY (or ANTHROPIC_API_KEY) in .env, or run with --until scrape.")
         return 1
     print(f"run {store.run_id}: {len(domains)} domain(s), steps up to '{args.until}' "
           f"(implemented: {', '.join(IMPLEMENTED_STEPS)})\n")

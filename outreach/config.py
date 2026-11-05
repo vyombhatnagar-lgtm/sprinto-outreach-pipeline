@@ -29,6 +29,10 @@ class Settings:
     anthropic_api_key: str
     model: str
     extract_model: str
+    provider: str
+    gemini_api_key: str
+    gemini_model: str
+    gemini_extract_model: str
     hunter_api_key: str
     gmail_mode: str
     gmail_sender: str
@@ -47,6 +51,25 @@ class Settings:
     def recipient(self) -> str:
         return HARDCODED_RECIPIENT
 
+    @property
+    def llm_ready(self) -> bool:
+        return bool(self.gemini_api_key if self.provider == "gemini" else self.anthropic_api_key)
+
+    @property
+    def models_summary(self) -> dict:
+        if self.provider == "gemini":
+            return {"provider": "gemini", "model": self.gemini_model, "extract_model": self.gemini_extract_model}
+        return {"provider": "anthropic", "model": self.model, "extract_model": self.extract_model}
+
+
+def _provider() -> str:
+    explicit = os.getenv("LLM_PROVIDER", "").strip().lower()
+    if explicit in ("gemini", "anthropic"):
+        return explicit
+    if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
+        return "gemini"
+    return "anthropic"
+
 
 def load_settings() -> Settings:
     return Settings(
@@ -54,6 +77,11 @@ def load_settings() -> Settings:
         model=os.getenv("OUTREACH_MODEL", "claude-opus-5-5"),
         # L4 slide 15: cleaned text into a cheap model gives the same extraction for a fraction of the cost
         extract_model=os.getenv("EXTRACT_MODEL", "claude-haiku-5-5"),
+        # LLM_PROVIDER=gemini|anthropic; unset -> gemini when a Gemini key is present
+        provider=_provider(),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", ""),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
+        gemini_extract_model=os.getenv("GEMINI_EXTRACT_MODEL", "") or os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
         hunter_api_key=os.getenv("HUNTER_API_KEY", ""),
         gmail_mode=os.getenv("GMAIL_MODE", "oauth").strip().lower(),
         gmail_sender=os.getenv("GMAIL_SENDER", ""),

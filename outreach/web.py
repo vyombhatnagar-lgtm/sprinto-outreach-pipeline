@@ -51,7 +51,7 @@ def home(runs: List[Dict[str, Any]], can_run: bool, steps: List[str]) -> str:
     form = f"""
 <div class="panel">
   <h2 style="margin-top:0">New run</h2>
-  {'' if can_run else '<p class="NO_GO badge">Runs are disabled: set APP_PASSWORD and ANTHROPIC_API_KEY in the Vercel project.</p>'}
+  {'' if can_run else '<p class="NO_GO badge">Runs are disabled: add GEMINI_API_KEY to the Vercel environment variables, then redeploy.</p>'}
   <label class="small muted">One domain per line</label>
   <textarea id="domains" placeholder="acme.io&#10;example-saas.com"></textarea>
   <div class="row" style="margin-top:10px">
@@ -159,7 +159,7 @@ def run_page(manifest: Dict[str, Any], records_by_domain: Dict[str, Dict[str, An
                        f'{escape(k)}: {v}</span>' for k, v in counts.items())
     s = manifest.get("settings", {})
     body = (header() + f'<h2>Run {escape(manifest["run_id"])}</h2>'
-            f'<p class="small muted">{escape(manifest.get("created_at", ""))} &middot; qualify model '
+            f'<p class="small muted">{escape(manifest.get("created_at", ""))} &middot; {escape(str(s.get("provider", "anthropic")))} &middot; qualify model '
             f'{escape(str(s.get("model")))} &middot; extract model {escape(str(s.get("extract_model")))} &middot; '
             f'prompt {escape(str(s.get("prompt_version")))}</p><p>{summary}</p>')
     body += "".join(domain_card(d, records_by_domain.get(d, {})) for d in manifest.get("domains", []))

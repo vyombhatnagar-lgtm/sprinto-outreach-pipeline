@@ -61,7 +61,7 @@ class Pipeline:
         try:
             profile, report = self.extractor.extract(scrape)
         except Exception as e:
-            self._record(domain, "extract", "error", started, model=self.settings.extract_model,
+            self._record(domain, "extract", "error", started, model=self.settings.models_summary["extract_model"],
                          prompt_version=PROMPT_VERSION, inputs={"pages": [home.url]},
                          error=f"{type(e).__name__}: {e}")
             summary["steps"]["extract"] = f"error: {e}"
@@ -81,7 +81,7 @@ class Pipeline:
         try:
             res = self.researcher.research(scrape, profile)
         except Exception as e:
-            self._record(domain, "qualify", "error", started, model=self.settings.model,
+            self._record(domain, "qualify", "error", started, model=self.settings.models_summary["model"],
                          prompt_version=PROMPT_VERSION, error=f"{type(e).__name__}: {e}")
             summary["steps"]["qualify"] = f"error: {e}"
             return summary
@@ -111,9 +111,9 @@ def build_pipeline(settings: Settings, store, until: str = "qualify", client=Non
     extractor = researcher = None
     if until != "scrape":
         from .extract import Extractor
-        from .llm import LLM
+        from .llm import make_llm
         from .research import Researcher
-        extractor = Extractor(LLM(settings, client=client, model=settings.extract_model))
+        extractor = Extractor(make_llm(settings, "extract", client=client))
         researcher = Researcher(load_scorecard(settings.icp_path), scraper, extractor,
-                                LLM(settings, client=client), max_fetches=settings.agent_max_rounds)
+                                make_llm(settings, "qualify", client=client), max_fetches=settings.agent_max_rounds)
     return Pipeline(settings, store, scraper=scraper, extractor=extractor, researcher=researcher)

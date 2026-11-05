@@ -17,7 +17,8 @@ The recipient is **hardcoded** to `vyom_bhatnagar@pg27.mesaschool.co`, as the ca
 
 ## How steps 1-3 work (follows MESA L4, "Data Acquisition & Agent Loops")
 1. **Scrape** - a single-fetch scraper: the homepage only. Request-based first; if the cleaned text is under 200 words (usually a JavaScript-rendered page) it is re-read through Jina Reader. Cleaning drops nav/footers, lines under 8 words unless they carry a buying signal ("SOC 2 Type II"), and duplicates, and caps each page at ~1,500 tokens. robots.txt is respected and requests are spaced out. A blocked site (403/429) is logged and skipped, never worked around.
-2. **Extract** - a cheap model (`EXTRACT_MODEL`, Haiku) fills named fields; every value needs a verbatim quote that is then checked against the page text.
+**Models:** Gemini (`GEMINI_MODEL`, default `gemini-3.8-flash`) when `GEMINI_API_KEY` is set, otherwise Anthropic (Haiku for extraction, Opus for qualifying). Set `LLM_PROVIDER` to force one.
+2. **Extract** - the extraction model fills named fields; every value needs a verbatim quote that is then checked against the page text.
 3. **Qualify** - the evidence map in `config/icp.yaml`:
 
    | Question | Filled when any of | Pages fetched, in order | Fetches | If still unanswered | Stops the run |
@@ -51,7 +52,7 @@ cp .env.example .env            # fill in keys
 
 ## Web dashboard (Vercel + Neon)
 `app.py` is a FastAPI app. Vercel deploys it as one function (`vercel.json` allows 300 s per request; each domain is its own request).
-Environment variables on Vercel: `ANTHROPIC_API_KEY`, `APP_PASSWORD` (HTTP Basic, any username), and `DATABASE_URL` (set by the Neon integration).
+Environment variables on Vercel: `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`), `DATABASE_URL` (set by the Neon integration), and optionally `APP_PASSWORD` to lock the dashboard (HTTP Basic, any username). Without `APP_PASSWORD` the dashboard is open to anyone with the URL.
 With `DATABASE_URL` set, traces go to Postgres tables `runs` and `steps`; without it, to `runs/` on disk.
 Run it locally with `.venv/bin/uvicorn app:app --reload` and `APP_PASSWORD=...` in `.env`.
 
