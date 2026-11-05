@@ -1,0 +1,11 @@
+{
+  "_comment": "Option B (Apollo) fallback. Copy to data/manual_pocs.json. Keyed by bare domain.",
+  "example-saas.io": {
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "position": "VP Engineering",
+    "email": "jane@example-saas.io",
+    "source": "apollo_manual",
+    "linkedin": null
+  }
+}

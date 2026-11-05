@@ -1,0 +1,125 @@
+# Sprinto ICP scorecard + evidence map.
+#
+# Origin tags:
+#   case       = stated in the case brief ("SaaS, typically Series A-C, preparing for an
+#                audit or under pressure from enterprise customers to get certified")
+#   whiteboard = from the team's whiteboard component map
+#   L4         = from the L4 lecture's evidence map (slides 30-31, 40)
+#   rec        = recommendation, adjustable
+#
+# Two layers, as L4 slide 30 asks:
+#   1. evidence_map - "is there enough to judge?" Checked in CODE: a field is filled
+#      or it isn't. When a question is open, the loop fetches the named page.
+#   2. criteria     - the model judges each criterion from the filled fields; the
+#      verdict is computed in code (outreach/icp.py) from these weights.
+
+version: 2
+
+evidence_map:
+  max_fetches_beyond_home: 4      # L4 slide 40: worst case 4 fetches beyond the homepage. Also AGENT_MAX_ROUNDS.
+  questions:
+    - id: certified
+      origin: [L4, case, whiteboard]
+      question: Already certified?
+      fields_any: [certifications_claimed, certification_status]
+      ladder: [security]           # /security, /trust (whiteboard: About Us / landing page)
+      limit: 1
+      if_unanswered: assume_gap_and_flag
+      short_circuit: holds both SOC 2 and ISO 27001 -> NO_GO, stop
+
+    - id: saas
+      origin: [L4, case, whiteboard]
+      question: B2B SaaS?
+      fields_any: [is_saas]
+      ladder: [about, product]
+      limit: 1
+      if_unanswered: manual_review
+      short_circuit: clearly not SaaS -> NO_GO, stop
+
+    - id: stage
+      origin: [L4, case, whiteboard]
+      question: Right stage?
+      fields_any: [funding_stage, employee_count, enterprise_signals, compliance_job_postings]
+      ladder: [careers, news, pricing, customers]   # L4: careers is rung one; whiteboard: Google News for funding
+      limit: 2
+      if_unanswered: qualify_lower_and_flag
+
+decision:
+  go_threshold: 0.55          # rec: weighted score needed for GO
+  max_unknown_share: 0.45     # rec: above this share of unknown weight -> MANUAL_REVIEW (hand to a human)
+  points: {met: 1.0, partial: 0.5, not_met: 0.0}
+
+# if_unknown (after the loop has run out of fetches):
+#   manual_review    - hand to a human (L4 slide 31: the cap is a designed handoff)
+#   assume_met_flag  - count as met, but flag it
+#   zero_flag        - count as 0 (lower rank), and flag it
+criteria:
+  - id: is_saas
+    origin: [case, whiteboard]
+    gate: true                # not_met -> NO_GO regardless of score
+    weight: 0
+    if_unknown: manual_review
+    fields: [is_saas, one_liner, target_customers]
+    question: Does the company sell software delivered as a service (SaaS) to businesses?
+    met_when: Product is cloud software sold by subscription to business buyers.
+    not_met_when: Services, hardware, marketplace or consumer-only product.
+
+  - id: certification_gap
+    origin: [case, whiteboard, L4]
+    gate: true                # not_met (already fully certified) -> NO_GO: nothing for Sprinto to sell
+    weight: 25
+    if_unknown: assume_met_flag
+    fields: [certifications_claimed, certification_status]
+    question: Is a certification Sprinto offers (SOC 2, ISO 27001, GDPR) missing or in progress?
+    met_when: No SOC 2 / ISO 27001 claimed, or one is described as in progress.
+    partial_when: Holds one of SOC 2 / ISO 27001 but not the other.
+    not_met_when: Already holds both SOC 2 and ISO 27001.
+
+  - id: funding_stage
+    origin: [case, whiteboard]
+    weight: 20
+    if_unknown: zero_flag
+    fields: [funding_stage]
+    question: Is the company at Series A-C?
+    met_when: Most recent round is Series A, B or C.
+    partial_when: Late seed with growth signals, or Series D with mid-market focus.
+    not_met_when: Pre-seed, bootstrapped micro-company, or late-stage/public.
+
+  - id: employee_count
+    origin: [whiteboard]
+    weight: 10
+    if_unknown: zero_flag
+    fields: [employee_count, compliance_job_postings]
+    question: Is headcount in the range typical for Series A-C SaaS?
+    met_when: Roughly 30-500 employees, or five or more open roles.   # rec / L4: "five or more open roles"
+    partial_when: 15-30 or 500-1000 employees.
+    not_met_when: Under 15 or over 1000 employees.
+
+  - id: compliance_hiring
+    origin: [case, whiteboard]
+    weight: 20
+    if_unknown: zero_flag
+    fields: [compliance_job_postings]
+    question: Do open roles suggest they are preparing for a compliance audit?
+    met_when: Job posts mention SOC 2, ISO 27001, GDPR, GRC, security compliance or audit readiness.
+    partial_when: Security / DevSecOps roles without explicit compliance language.
+    not_met_when: Careers page was read and lists no security or compliance roles.
+
+  - id: enterprise_pressure
+    origin: [case]            # not on the whiteboard - added to cover the case's second ICP trigger
+    weight: 15
+    if_unknown: zero_flag
+    fields: [enterprise_signals, target_customers]
+    question: Are they selling upmarket, where enterprise buyers demand certification?
+    met_when: Enterprise plan, enterprise logos, SSO/SAML, security questionnaires or procurement language.
+    partial_when: Mid-market customers only.
+    not_met_when: Self-serve consumer or very small business only.
+
+  - id: security_news
+    origin: [whiteboard]      # "Neg News" on the board
+    weight: 10
+    if_unknown: zero_flag
+    fields: [security_news, funding_stage]
+    question: Is there recent news that raises compliance urgency?
+    met_when: Breach, incident, regulatory action, or a funding/enterprise deal that implies audit pressure.
+    not_met_when: News was checked and shows nothing relevant.

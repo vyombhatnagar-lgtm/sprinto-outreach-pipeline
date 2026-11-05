@@ -1,0 +1,8 @@
+.env
+secrets/
+runs/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/manual_pocs.json
