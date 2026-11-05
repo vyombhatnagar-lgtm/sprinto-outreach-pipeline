@@ -36,7 +36,13 @@ def require_auth(creds: HTTPBasicCredentials = Depends(basic)) -> None:
 @app.get("/healthz")
 def healthz():
     s = load_settings()
-    return {"ok": True, "store": "postgres" if s.database_url else "files",
+    try:
+        open_store(s).list_runs(limit=1)
+        store_ok = True
+    except Exception as e:  # report the failure class, never the connection string
+        store_ok = f"error: {type(e).__name__}"
+    return {"ok": True, "store": "postgres" if s.database_url else "files", "store_ok": store_ok,
+            "app_password_set": bool(os.getenv("APP_PASSWORD")),
             "anthropic_key": bool(s.anthropic_api_key), "recipient": HARDCODED_RECIPIENT,
             "prompt_version": PROMPT_VERSION}
 
