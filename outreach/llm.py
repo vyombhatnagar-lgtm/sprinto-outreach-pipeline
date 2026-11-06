@@ -161,7 +161,13 @@ class GeminiLLM:
                                    headers={"x-goog-api-key": self.api_key}, timeout=self.timeout)
                 if r.status_code not in GEMINI_RETRY_STATUS:
                     return r, model, attempt
-                last_err = f"HTTP {r.status_code}"
+                last_err = f"HTTP {r.status_code} on {model}"
+                try:
+                    detail = str(r.json().get("error", {}).get("message", ""))[:220]
+                except ValueError:
+                    detail = ""
+                if detail:
+                    last_err += f": {detail}"
                 hint = _retry_after(r)
             except httpx.TimeoutException:
                 last_err, hint = f"timed out after {self.timeout:.0f}s", None
