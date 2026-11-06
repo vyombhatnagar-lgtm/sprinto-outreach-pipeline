@@ -91,7 +91,7 @@ go && go.addEventListener('click', async () => {
       } catch (e) { prog.textContent = `${tag}: network error, retrying…`; await new Promise(z => setTimeout(z, 5000)); continue; }
       prog.textContent = `${tag}: ${r.stage} - ${r.message || ''}`;
       if (r.done) break;
-      if (r.retry) { prog.textContent += ' (model busy, retrying in 10s)'; await new Promise(z => setTimeout(z, 10000)); }
+      if (r.retry) { prog.textContent += ' (model busy or rate-limited, retrying in 30s)'; await new Promise(z => setTimeout(z, 30000)); }
     }
   }
   location.href = `/runs/${run.run_id}`;

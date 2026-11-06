@@ -308,3 +308,17 @@ def test_retries_are_capped(tmp_path):
     pipe, store = _pipe(tmp_path, extract_fn=always_busy)
     res = pipe.run_domain("acme.io", retry_wait=0)
     assert "error" in res["steps"]["extract"] and "qualification" not in res
+
+
+def test_gemini_honours_retry_delay():
+    waits, calls = [], []
+
+    def handler(req):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(429, json={"error": {"details": [
+                {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "21s"}]}})
+        return httpx.Response(200, json=_ok_scores())
+    llm = GeminiLLM("k", "m", http=httpx.Client(transport=httpx.MockTransport(handler)), sleep=waits.append)
+    llm.structured(system="s", user="u", output_model=_Scores)
+    assert waits == [21.0]

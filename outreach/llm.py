@@ -120,6 +120,20 @@ def gemini_schema(model: Type[BaseModel]) -> Dict[str, Any]:
     return walk(raw)
 
 
+def _retry_after(r: httpx.Response) -> Optional[float]:
+    """Seconds the API asks us to wait (Retry-After header, or RetryInfo in the error body)."""
+    h = r.headers.get("retry-after")
+    if h and h.replace(".", "", 1).isdigit():
+        return min(float(h), 60.0)
+    try:
+        for d in r.json().get("error", {}).get("details", []):
+            if str(d.get("@type", "")).endswith("RetryInfo") and str(d.get("retryDelay", "")).endswith("s"):
+                return min(float(d["retryDelay"][:-1]), 60.0)
+    except (ValueError, AttributeError):
+        pass
+    return None
+
+
 class GeminiLLM:
     """Same interface as LLM.structured, backed by the Gemini API."""
 
@@ -148,11 +162,12 @@ class GeminiLLM:
                 if r.status_code not in GEMINI_RETRY_STATUS:
                     return r, model, attempt
                 last_err = f"HTTP {r.status_code}"
+                hint = _retry_after(r)
             except httpx.TimeoutException:
-                last_err = f"timed out after {self.timeout:.0f}s"
+                last_err, hint = f"timed out after {self.timeout:.0f}s", None
             except httpx.HTTPError as e:
-                last_err = type(e).__name__
-            wait = self.backoff[min(attempt - 1, len(self.backoff) - 1)]
+                last_err, hint = type(e).__name__, None
+            wait = hint if hint is not None else self.backoff[min(attempt - 1, len(self.backoff) - 1)]
             if attempt == self.attempts or time.monotonic() - start + wait + self.timeout > self.budget:
                 break
             self._sleep(wait)
