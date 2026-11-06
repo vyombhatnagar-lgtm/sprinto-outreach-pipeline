@@ -47,6 +47,22 @@ def healthz():
             "prompt_version": PROMPT_VERSION}
 
 
+@app.get("/api/models", dependencies=[Depends(require_auth)])
+def gemini_models():
+    """Which Gemini models this key can call (names only), to pick a model or fallback."""
+    import httpx
+    s = load_settings()
+    if not s.gemini_api_key:
+        raise HTTPException(400, "GEMINI_API_KEY is not set")
+    r = httpx.get("https://generativelanguage.googleapis.com/v1beta/models", params={"pageSize": 200},
+                  headers={"x-goog-api-key": s.gemini_api_key}, timeout=20)
+    if r.status_code != 200:
+        raise HTTPException(502, f"Gemini models list failed: HTTP {r.status_code}")
+    models = [m["name"].split("/", 1)[-1] for m in r.json().get("models", [])
+              if "generateContent" in m.get("supportedGenerationMethods", [])]
+    return {"current": s.gemini_model, "fallback": s.gemini_fallback_model or None, "models": models}
+
+
 @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
 def home():
     s = load_settings()
