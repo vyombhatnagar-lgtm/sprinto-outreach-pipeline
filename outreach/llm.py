@@ -7,6 +7,7 @@ into the step's trace record.
 from typing import Any, Dict, Optional, Tuple, Type, TypeVar
 
 import copy
+import time
 
 import anthropic
 import httpx
@@ -20,7 +21,11 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 class LLMError(RuntimeError):
-    pass
+    """retryable=True means the provider was busy or unreachable: the same step can be tried again later."""
+
+    def __init__(self, message: str, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class LLM:
@@ -51,11 +56,12 @@ class LLM:
         except anthropic.BadRequestError as e:
             raise LLMError(f"Anthropic rejected the request: {e.message}") from e
         except anthropic.RateLimitError as e:
-            raise LLMError("Anthropic rate limit hit - retry later") from e
+            raise LLMError("Anthropic rate limit hit - retry later", retryable=True) from e
         except anthropic.APIStatusError as e:
-            raise LLMError(f"Anthropic API error {e.status_code}: {e.message}") from e
+            raise LLMError(f"Anthropic API error {e.status_code}: {e.message}",
+                           retryable=e.status_code >= 500) from e
         except anthropic.APIConnectionError as e:
-            raise LLMError("Could not reach the Anthropic API") from e
+            raise LLMError("Could not reach the Anthropic API", retryable=True) from e
 
         meta = {
             "model": resp.model,
@@ -83,6 +89,7 @@ class LLM:
 # ---------------- Gemini (Google AI Studio key) ----------------
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_RETRY_STATUS = {429, 500, 502, 503, 504}
 GEMINI_BAD_FINISH = {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "LANGUAGE", "OTHER"}
 
 
@@ -116,12 +123,41 @@ def gemini_schema(model: Type[BaseModel]) -> Dict[str, Any]:
 class GeminiLLM:
     """Same interface as LLM.structured, backed by the Gemini API."""
 
-    def __init__(self, api_key: str, model: str, http: Optional[httpx.Client] = None):
+    def __init__(self, api_key: str, model: str, http: Optional[httpx.Client] = None,
+                 fallback_model: str = "", attempts: int = 3, timeout: float = 70.0,
+                 budget: float = 200.0, backoff=(4.0, 10.0), sleep=None):
         if not api_key:
             raise LLMError("GEMINI_API_KEY is not set")
         self.model = model
+        self.fallback_model = fallback_model
         self.api_key = api_key
-        self.http = http or httpx.Client(timeout=180.0)
+        self.http = http or httpx.Client(timeout=timeout)
+        self.attempts, self.timeout, self.budget, self.backoff = attempts, timeout, budget, backoff
+        self._sleep = sleep or time.sleep
+
+    def _post(self, body: Dict[str, Any]) -> Tuple[httpx.Response, str, int]:
+        """POST with retries on busy/unavailable responses. Stays inside `budget` seconds so one
+        pipeline step fits in a single serverless request. The last attempt may use a fallback model."""
+        start = time.monotonic()
+        last_err = "no attempt made"
+        for attempt in range(1, self.attempts + 1):
+            model = self.fallback_model if (attempt == self.attempts and self.fallback_model) else self.model
+            try:
+                r = self.http.post(GEMINI_URL.format(model=model), json=body,
+                                   headers={"x-goog-api-key": self.api_key}, timeout=self.timeout)
+                if r.status_code not in GEMINI_RETRY_STATUS:
+                    return r, model, attempt
+                last_err = f"HTTP {r.status_code}"
+            except httpx.TimeoutException:
+                last_err = f"timed out after {self.timeout:.0f}s"
+            except httpx.HTTPError as e:
+                last_err = type(e).__name__
+            wait = self.backoff[min(attempt - 1, len(self.backoff) - 1)]
+            if attempt == self.attempts or time.monotonic() - start + wait + self.timeout > self.budget:
+                break
+            self._sleep(wait)
+        raise LLMError(f"Gemini is busy or unreachable ({last_err}) after {attempt} attempt(s); "
+                       f"the step can be retried", retryable=True)
 
     def structured(self, *, system: str, user: str, output_model: Type[T],
                    effort: str = "medium", max_tokens: int = 16000) -> Tuple[T, Dict[str, Any]]:
@@ -134,15 +170,9 @@ class GeminiLLM:
                 "maxOutputTokens": max_tokens,
             },
         }
-        try:
-            r = self.http.post(GEMINI_URL.format(model=self.model), json=body,
-                               headers={"x-goog-api-key": self.api_key})
-        except httpx.HTTPError as e:
-            raise LLMError(f"Could not reach the Gemini API: {type(e).__name__}") from e
+        r, model_used, attempts = self._post(body)
         if r.status_code in (401, 403):
             raise LLMError("Gemini authentication failed - check GEMINI_API_KEY")
-        if r.status_code == 429:
-            raise LLMError("Gemini rate limit or quota hit - retry later")
         if r.status_code >= 400:
             try:
                 msg = r.json().get("error", {}).get("message", r.text[:300])
@@ -155,12 +185,13 @@ class GeminiLLM:
         cand = (data.get("candidates") or [{}])[0]
         finish = cand.get("finishReason")
         meta = {
-            "model": data.get("modelVersion") or self.model,
+            "model": data.get("modelVersion") or model_used,
+            "attempts": attempts,
             "stop_reason": finish,
             "input_tokens": usage.get("promptTokenCount"),
             "output_tokens": usage.get("candidatesTokenCount"),
             "thinking_tokens": usage.get("thoughtsTokenCount"),
-            "fallback_ran": False,
+            "fallback_ran": model_used != self.model,
         }
         block = (data.get("promptFeedback") or {}).get("blockReason")
         if block:
@@ -183,6 +214,6 @@ def make_llm(settings, role: str, client=None):
     """role = 'extract' (cheap model) or 'qualify' (stronger model)."""
     if settings.provider == "gemini":
         model = settings.gemini_extract_model if role == "extract" else settings.gemini_model
-        return GeminiLLM(settings.gemini_api_key, model)
+        return GeminiLLM(settings.gemini_api_key, model, fallback_model=settings.gemini_fallback_model)
     model = settings.extract_model if role == "extract" else settings.model
     return LLM(settings, client=client, model=model)

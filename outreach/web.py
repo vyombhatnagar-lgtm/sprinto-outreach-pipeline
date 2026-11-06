@@ -81,11 +81,18 @@ go && go.addEventListener('click', async () => {
   const run = await r.json();
   if (!r.ok) { prog.textContent = run.detail || 'Error'; go.disabled = false; return; }
   for (const [i, d] of run.domains.entries()) {
-    prog.textContent = `(${i + 1}/${run.domains.length}) researching ${d}… this can take a minute or two`;
-    try {
-      const res = await fetch(`/api/runs/${run.run_id}/domains/${encodeURIComponent(d)}?until=${until}`, {method: 'POST'});
-      if (!res.ok) console.warn(d, await res.text());
-    } catch (e) { console.warn(d, e); }
+    const tag = `(${i + 1}/${run.domains.length}) ${d}`;
+    for (let unit = 0; unit < 30; unit++) {
+      let r;
+      try {
+        const res = await fetch(`/api/runs/${run.run_id}/domains/${encodeURIComponent(d)}/advance?until=${until}`, {method: 'POST'});
+        r = await res.json();
+        if (!res.ok) { prog.textContent = `${tag}: ${r.detail || res.status}`; break; }
+      } catch (e) { prog.textContent = `${tag}: network error, retrying…`; await new Promise(z => setTimeout(z, 5000)); continue; }
+      prog.textContent = `${tag}: ${r.stage} - ${r.message || ''}`;
+      if (r.done) break;
+      if (r.retry) { prog.textContent += ' (model busy, retrying in 10s)'; await new Promise(z => setTimeout(z, 10000)); }
+    }
   }
   location.href = `/runs/${run.run_id}`;
 });

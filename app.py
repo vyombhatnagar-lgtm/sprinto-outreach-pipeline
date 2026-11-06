@@ -77,8 +77,9 @@ def create_run(body: NewRun):
     return {"run_id": store.run_id, "domains": domains}
 
 
-@app.post("/api/runs/{run_id}/domains/{domain}", dependencies=[Depends(require_auth)])
-def run_domain(run_id: str, domain: str, until: str = "qualify"):
+@app.post("/api/runs/{run_id}/domains/{domain}/advance", dependencies=[Depends(require_auth)])
+def advance_domain(run_id: str, domain: str, until: str = "qualify"):
+    """Do one unit of work for one domain (scrape, extract, one loop fetch, or final scoring)."""
     s = load_settings()
     store = open_store(s, run_id)
     manifest = store.read_manifest()
@@ -91,10 +92,7 @@ def run_domain(run_id: str, domain: str, until: str = "qualify"):
         pipe = build_pipeline(s, store, until=until)
     except Exception as e:
         raise HTTPException(503, f"Cannot create the LLM client: {e}")
-    res = pipe.run_domain(domain, until)
-    q = res.get("qualification")
-    return {"domain": domain, "steps": {k: str(v) for k, v in res["steps"].items()},
-            "decision": q.decision if q else None}
+    return {"domain": domain, **pipe.advance(domain, until)}
 
 
 @app.get("/runs/{run_id}", response_class=HTMLResponse, dependencies=[Depends(require_auth)])

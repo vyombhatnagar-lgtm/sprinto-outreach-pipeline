@@ -197,8 +197,9 @@ def test_gemini_schema_inlines_refs_and_nullables():
     assert sch["additionalProperties"] is False
 
 
-def _gemini(handler):
-    return GeminiLLM("k", "gemini-test", http=httpx.Client(transport=httpx.MockTransport(handler)))
+def _gemini(handler, **kw):
+    return GeminiLLM("k", "gemini-test", http=httpx.Client(transport=httpx.MockTransport(handler)),
+                     sleep=lambda s: None, **kw)
 
 
 def test_gemini_structured_parses_json_and_records_usage():
@@ -218,7 +219,8 @@ def test_gemini_structured_parses_json_and_records_usage():
 
 @pytest.mark.parametrize("resp,msg", [
     (httpx.Response(403, json={"error": {"message": "bad key"}}), "authentication"),
-    (httpx.Response(429, json={}), "rate limit"),
+    (httpx.Response(429, json={}), "busy"),
+    (httpx.Response(503, json={}), "busy"),
     (httpx.Response(200, json={"promptFeedback": {"blockReason": "SAFETY"}}), "blocked"),
     (httpx.Response(200, json={"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": []}}]}), "max"),
 ])
@@ -232,3 +234,77 @@ def test_provider_defaults_to_gemini_when_key_present(monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     s = load_settings()
     assert s.provider == "gemini" and s.llm_ready
+
+
+def _ok_scores():
+    out = _Scores(scores=[_Score(criterion_id="is_saas", status="met", reason="r", supporting_fields=[])])
+    return {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": out.model_dump_json()}]}}]}
+
+
+def test_gemini_retries_busy_then_succeeds_and_can_fall_back():
+    calls = []
+
+    def handler(req):
+        calls.append(req.url.path)
+        if len(calls) < 3:
+            return httpx.Response(503, json={"error": {"message": "high demand"}})
+        return httpx.Response(200, json=_ok_scores())
+    parsed, meta = _gemini(handler, fallback_model="gemini-backup").structured(system="s", user="u", output_model=_Scores)
+    assert meta["attempts"] == 3 and meta["fallback_ran"] is True
+    assert calls[0].endswith("gemini-test:generateContent") and calls[2].endswith("gemini-backup:generateContent")
+
+
+def test_busy_error_is_retryable():
+    with pytest.raises(LLMError) as ei:
+        _gemini(lambda req: httpx.Response(503, json={})).structured(system="s", user="u", output_model=_Scores)
+    assert ei.value.retryable
+
+
+# ---- resumable pipeline: one unit of work per call ----
+
+def _pipe(tmp_path, qual=None, extract_fn=page_aware_extraction):
+    store = TraceStore(tmp_path)
+    store.write_manifest(["acme.io"], {})
+    sc = scraper()
+    ex = Extractor(FakeLLM(extract_fn))
+    return Pipeline(load_settings(), store, scraper=sc, extractor=ex,
+                    researcher=Researcher(CARD, sc, ex, qual or qualifier())), store
+
+
+def test_advance_does_one_unit_per_call(tmp_path):
+    pipe, store = _pipe(tmp_path)
+    stages = []
+    for _ in range(10):
+        r = pipe.advance("acme.io")
+        stages.append(r["stage"])
+        if r["done"]:
+            break
+    assert stages == ["scrape", "extract", "research", "research", "qualify"]
+    assert store.read_step("acme.io", "qualify").output["qualification"]["decision"] == "GO"
+
+
+def test_busy_model_mid_loop_resumes_without_losing_state(tmp_path):
+    state = {"busy": True}
+
+    def flaky(kw):
+        if "SOC 2 Type II audit" in kw["user"] and state["busy"]:
+            raise LLMError("Gemini is busy", retryable=True)
+        return page_aware_extraction(kw)
+    pipe, store = _pipe(tmp_path, extract_fn=flaky)
+    pipe.advance("acme.io"); pipe.advance("acme.io")         # scrape, extract
+    r = pipe.advance("acme.io")                               # loop fetch hits a busy model
+    assert r["retry"] and not r["done"]
+    assert store.read_step("acme.io", "qualify").status == "error"
+    state["busy"] = False
+    r = pipe.advance("acme.io")                               # same fetch again, succeeds
+    assert r["stage"] == "research"
+    st = store.read_step("acme.io", "qualify").output["state"]
+    assert [s["page_kind"] for s in st["steps"]] == ["security"]
+
+
+def test_retries_are_capped(tmp_path):
+    def always_busy(kw):
+        raise LLMError("busy", retryable=True)
+    pipe, store = _pipe(tmp_path, extract_fn=always_busy)
+    res = pipe.run_domain("acme.io", retry_wait=0)
+    assert "error" in res["steps"]["extract"] and "qualification" not in res

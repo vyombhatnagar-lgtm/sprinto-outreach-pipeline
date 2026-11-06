@@ -19,7 +19,8 @@ from pydantic import BaseModel, ConfigDict
 from .config import PROMPT_VERSION
 from .extract import Extractor, merge
 from .icp import Question, Scorecard, decide
-from .models import AgentStep, CompanyProfile, CriterionScore, Evidence, Qualification, ScrapeResult
+from .llm import LLMError
+from .models import AgentStep, CompanyProfile, CriterionScore, Evidence, Qualification, RawPage, ScrapeResult
 from .scrape import Scraper
 
 
@@ -135,8 +136,23 @@ def check_scores(card: Scorecard, raw: _Scores, profile: CompanyProfile) -> Tupl
     return out, downgraded
 
 
+class LoopState(BaseModel):
+    """Everything the loop needs to resume in a later request (stored in the qualify trace record)."""
+    profile: CompanyProfile
+    used: Dict[str, int] = {}
+    tried: List[str] = []
+    steps: List[AgentStep] = []
+    pages: List[RawPage] = []
+    llm_calls: List[Dict[str, Any]] = []
+    stop: Optional[str] = None
+    done_fetching: bool = False
+
+
 class Researcher:
-    """Runs the loop and the final qualification for one domain."""
+    """Runs the loop and the final qualification for one domain.
+
+    Resumable: start() -> step() ... step() returns False -> finish(). Each call does at most
+    one page fetch and one model call, so each fits in its own short serverless request."""
 
     def __init__(self, card: Scorecard, scraper: Scraper, extractor: Extractor, qualifier_llm,
                  max_fetches: Optional[int] = None):
@@ -146,71 +162,80 @@ class Researcher:
         self.llm = qualifier_llm
         self.max_fetches = card.max_fetches if max_fetches is None else min(max_fetches, card.max_fetches)
 
-    def research(self, scrape: ScrapeResult, profile: CompanyProfile) -> Dict[str, Any]:
-        profile = profile.model_copy(deep=True)
-        used: Dict[str, int] = {}
-        tried: set = set()
-        steps: List[AgentStep] = []
-        pages = [p for p in scrape.pages]
-        llm_calls: List[Dict[str, Any]] = []
-        stop = short_circuit(profile)
+    def start(self, scrape: ScrapeResult, profile: CompanyProfile) -> LoopState:
+        prof = profile.model_copy(deep=True)
+        return LoopState(profile=prof, pages=list(scrape.pages), stop=short_circuit(prof))
 
-        while stop is None and len(steps) < self.max_fetches:
-            nxt = next_fetch(profile, self.card, used, tried)
-            if nxt is None:
-                break
-            q, kind = nxt
-            missing = missing_fields(profile, q)
-            tried.add(kind)
-            used[q.id] = used.get(q.id, 0) + 1
-            fetched = self.scraper.fetch_kind(scrape.domain, kind, scrape.links, scrape.ats,
-                                              company=profile.company_name.value)
-            pages.extend(fetched)
-            with_text = [p for p in fetched if p.text]
-            filled: List[str] = []
-            summary = "no readable page: " + "; ".join(f"{p.url} ({p.error})" for p in fetched)
-            if with_text:
-                try:
-                    new, report = self.extractor.extract(ScrapeResult(domain=scrape.domain, pages=with_text))
-                    llm_calls.append(report["llm"])
-                    filled = merge(profile, new)
-                    summary = f"read {len(with_text)} page(s), {sum(p.words for p in with_text)} words; " + \
-                              (f"filled {filled}" if filled else "nothing new")
-                except Exception as e:
-                    summary = f"extraction failed: {type(e).__name__}: {e}"
-            steps.append(AgentStep(round=len(steps) + 1, question=q.id, missing_fields=missing, page_kind=kind,
-                                   urls=[p.url for p in fetched], result_summary=summary, fields_filled=filled))
-            stop = short_circuit(profile)
+    def step(self, scrape: ScrapeResult, st: LoopState) -> bool:
+        """One fetch. Returns False (and marks done_fetching) when the loop should stop.
+        A provider outage (retryable LLMError) propagates without changing the state, so
+        the same fetch is simply tried again on the next request."""
+        if st.stop is not None or len(st.steps) >= self.max_fetches:
+            st.done_fetching = True
+            return False
+        nxt = next_fetch(st.profile, self.card, st.used, set(st.tried))
+        if nxt is None:
+            st.done_fetching = True
+            return False
+        q, kind = nxt
+        missing = missing_fields(st.profile, q)
+        fetched = self.scraper.fetch_kind(scrape.domain, kind, scrape.links, scrape.ats,
+                                          company=st.profile.company_name.value)
+        with_text = [p for p in fetched if p.text]
+        filled: List[str] = []
+        summary = "no readable page: " + "; ".join(f"{p.url} ({p.error})" for p in fetched)
+        if with_text:
+            try:
+                new, report = self.extractor.extract(ScrapeResult(domain=scrape.domain, pages=with_text))
+            except LLMError as e:
+                if e.retryable:
+                    raise
+                new, report, summary = None, None, f"extraction failed: {e}"
+            if new is not None:
+                st.llm_calls.append(report["llm"])
+                filled = merge(st.profile, new)
+                summary = f"read {len(with_text)} page(s), {sum(p.words for p in with_text)} words; " + \
+                          (f"filled {filled}" if filled else "nothing new")
+        st.tried.append(kind)
+        st.used[q.id] = st.used.get(q.id, 0) + 1
+        st.pages.extend(fetched)
+        st.steps.append(AgentStep(round=len(st.steps) + 1, question=q.id, missing_fields=missing, page_kind=kind,
+                                  urls=[p.url for p in fetched], result_summary=summary, fields_filled=filled))
+        st.stop = short_circuit(st.profile)
+        return True
 
+    def finish(self, scrape: ScrapeResult, st: LoopState) -> Dict[str, Any]:
+        profile, used = st.profile, st.used
         unanswered = [q for q in self.card.questions if not is_answered(profile, q)]
         extra_flags = []
         for q in unanswered:
+            n = used.get(q.id, 0)
             if q.if_unanswered == "assume_gap_and_flag":
-                extra_flags.append(f"'{q.question}' unanswered after {used.get(q.id, 0)} fetch(es): treated as not certified")
+                extra_flags.append(f"'{q.question}' unanswered after {n} fetch(es): treated as not certified")
             elif q.if_unanswered == "qualify_lower_and_flag":
-                extra_flags.append(f"'{q.question}' unanswered after {used.get(q.id, 0)} fetch(es): ranked lower")
+                extra_flags.append(f"'{q.question}' unanswered after {n} fetch(es): ranked lower")
             elif q.if_unanswered == "manual_review":
-                extra_flags.append(f"'{q.question}' unanswered after {used.get(q.id, 0)} fetch(es): needs a human")
+                extra_flags.append(f"'{q.question}' unanswered after {n} fetch(es): needs a human")
 
-        pages_read = [p.url for p in pages if p.text]
+        pages_read = [p.url for p in st.pages if p.text]
         raw, meta = self.llm.structured(system=QUALIFY_SYSTEM,
                                         user=build_qualify_prompt(self.card, profile, pages_read),
                                         output_model=_Scores, effort="medium")
-        llm_calls.append(meta)
+        llm_calls = st.llm_calls + [meta]
         scores, downgraded = check_scores(self.card, raw, profile)
-        d = decide(self.card, scores, short_circuit=stop, extra_flags=extra_flags)
-
+        d = decide(self.card, scores, short_circuit=st.stop, extra_flags=extra_flags)
         qual = Qualification(
             domain=scrape.domain, scores=scores, weighted_score=d.weighted_score,
             unknown_weight_share=d.unknown_weight_share, decision=d.decision, decision_rule=d.rule,
-            flags=d.flags, short_circuit=stop, unanswered_questions=[q.id for q in unanswered], agent_steps=steps,
+            flags=d.flags, short_circuit=st.stop, unanswered_questions=[q.id for q in unanswered],
+            agent_steps=st.steps,
         )
-        return {
-            "qualification": qual,
-            "profile": profile,
-            "pages": pages,
-            "llm_calls": llm_calls,
-            "downgraded": downgraded,
-            "fetches_used": len(steps),
-            "fetch_cap": self.max_fetches,
-        }
+        return {"qualification": qual, "profile": profile, "pages": st.pages, "llm_calls": llm_calls,
+                "downgraded": downgraded, "fetches_used": len(st.steps), "fetch_cap": self.max_fetches}
+
+    def research(self, scrape: ScrapeResult, profile: CompanyProfile) -> Dict[str, Any]:
+        """Whole loop in one go (CLI and tests)."""
+        st = self.start(scrape, profile)
+        while self.step(scrape, st):
+            pass
+        return self.finish(scrape, st)
