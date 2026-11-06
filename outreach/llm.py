@@ -151,11 +151,11 @@ class GeminiLLM:
 
     def _post(self, body: Dict[str, Any]) -> Tuple[httpx.Response, str, int]:
         """POST with retries on busy/unavailable responses. Stays inside `budget` seconds so one
-        pipeline step fits in a single serverless request. The last attempt may use a fallback model."""
+        pipeline step fits in a single serverless request. Retries go to the fallback model, if set."""
         start = time.monotonic()
         last_err = "no attempt made"
         for attempt in range(1, self.attempts + 1):
-            model = self.fallback_model if (attempt == self.attempts and self.fallback_model) else self.model
+            model = self.fallback_model if (attempt >= 2 and self.fallback_model) else self.model
             try:
                 r = self.http.post(GEMINI_URL.format(model=model), json=body,
                                    headers={"x-goog-api-key": self.api_key}, timeout=self.timeout)

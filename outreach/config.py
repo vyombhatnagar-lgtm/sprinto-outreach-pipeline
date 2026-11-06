@@ -83,7 +83,7 @@ def load_settings() -> Settings:
         gemini_api_key=os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", ""),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
         gemini_extract_model=os.getenv("GEMINI_EXTRACT_MODEL", "") or os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
-        gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", ""),   # optional: used on the last retry
+        gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.7-flash"),  # used on retries when the main model is busy
         hunter_api_key=os.getenv("HUNTER_API_KEY", ""),
         gmail_mode=os.getenv("GMAIL_MODE", "oauth").strip().lower(),
         gmail_sender=os.getenv("GMAIL_SENDER", ""),
