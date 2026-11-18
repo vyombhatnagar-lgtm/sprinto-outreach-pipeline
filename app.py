@@ -43,7 +43,8 @@ def healthz():
         store_ok = f"error: {type(e).__name__}"
     return {"ok": True, "store": "postgres" if s.database_url else "files", "store_ok": store_ok,
             "app_password_set": bool(os.getenv("APP_PASSWORD")),
-            "llm_provider": s.provider, "llm_key_set": s.llm_ready, "recipient": HARDCODED_RECIPIENT,
+            "llm_provider": s.provider, "llm_key_set": s.llm_ready,
+            "hunter_key_set": bool(s.hunter_api_key), "gmail_ready": s.gmail_ready, "gmail_mode": s.gmail_mode, "recipient": HARDCODED_RECIPIENT,
             "prompt_version": PROMPT_VERSION}
 
 
@@ -72,7 +73,7 @@ def home():
 
 class NewRun(BaseModel):
     domains: list
-    until: str = "qualify"
+    until: str = "send"
 
 
 @app.post("/api/runs", dependencies=[Depends(require_auth)])
@@ -94,7 +95,7 @@ def create_run(body: NewRun):
 
 
 @app.post("/api/runs/{run_id}/domains/{domain}/advance", dependencies=[Depends(require_auth)])
-def advance_domain(run_id: str, domain: str, until: str = "qualify"):
+def advance_domain(run_id: str, domain: str, until: str = "send"):
     """Do one unit of work for one domain (scrape, extract, one loop fetch, or final scoring)."""
     s = load_settings()
     store = open_store(s, run_id)

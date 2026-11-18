@@ -145,6 +145,7 @@ def domain_card(domain: str, records: Dict[str, Any]) -> str:
         else:
             parts.append('</h2>')
         profile = e_rec.output["profile"] if e_rec and e_rec.status == "ok" else {}
+    parts.append(outreach_section(records))
     if profile:
         rows = "".join(
             f'<tr><td>{escape(k)}</td><td>{escape(str(v["value"]))}{_ev(v.get("evidence", []), 1)}</td></tr>'
@@ -154,6 +155,43 @@ def domain_card(domain: str, records: Dict[str, Any]) -> str:
                        f'{s}.json</a>' for s, r in records.items() if r)
     parts.append(f'<p class="small muted">Raw trace: {links}</p></div>')
     return "".join(parts)
+
+
+def outreach_section(records: Dict[str, Any]) -> str:
+    """Steps 4-7: who, why them, the two pains, the email, and whether it was sent."""
+    poc, pains, draft, send = (records.get(k) for k in ("poc", "pains", "draft", "send"))
+    if not any((poc, pains, draft, send)):
+        return ""
+    out = ['<h3>Outreach</h3>']
+    if poc:
+        c = (poc.output or {}).get("chosen")
+        if c:
+            out.append(f'<p><b>Contact:</b> {escape(c["first_name"])} {escape(c.get("last_name") or "")} - '
+                       f'{escape(c.get("position") or "")} <span class="chip">{escape(c.get("source", ""))}</span> '
+                       f'<span class="muted small">{escape(c.get("email") or "")}</span></p>')
+        out.append(f'<p class="small muted">Why this person: {escape(poc.note or "")}</p>')
+    if pains and pains.status == "ok":
+        for pp in pains.output["pains"]["pains"]:
+            out.append(f'<div><b>{escape(pp["title"])}</b> - {escape(pp["why_this_person"])} '
+                       f'<span class="muted">Sprinto: {escape(pp["sprinto_answer"])}</span>{_ev(pp.get("evidence", []), 1)}</div>')
+    elif pains and pains.status == "error":
+        out.append(f'<p class="small">Pain points failed: {escape(pains.error or "")}</p>')
+    if draft and draft.status == "ok":
+        d = draft.output["draft"]
+        checks = draft.output.get("report", {}).get("checks", [])
+        chips = "".join(f'<span class="chip">{"✓" if c["severity"] == "pass" else "⚠"} {escape(c["check"])}</span>'
+                        for c in checks)
+        out.append(f'<div class="panel" style="background:var(--bg)"><div class="small muted">To: {escape(d["to_name"])} '
+                   f'(intended {escape(d.get("intended_address") or "n/a")})</div><div><b>{escape(d["subject"])}</b></div>'
+                   f'<pre style="white-space:pre-wrap;font:inherit;margin:8px 0">{escape(d["body"])}</pre>'
+                   f'<div class="small muted">Hook: {escape(d["hook"])}</div>{_ev(d.get("hook_evidence", []), 1)}'
+                   f'<div style="margin-top:6px">{chips}</div></div>')
+    elif draft and draft.status == "error":
+        out.append(f'<p class="small">Draft failed: {escape(draft.error or "")}</p>')
+    if send:
+        label = {"ok": "✉ Sent", "skipped": "Not sent", "error": "Send failed"}.get(send.status, send.status)
+        out.append(f'<p><b>{label}</b> <span class="muted small">{escape(send.note or send.error or "")}</span></p>')
+    return "".join(out)
 
 
 def run_page(manifest: Dict[str, Any], records_by_domain: Dict[str, Dict[str, Any]]) -> str:

@@ -16,7 +16,8 @@ from .llm import LLMError
 from .models import STEP_ORDER, CompanyProfile, Qualification, ScrapeResult, StepRecord, utcnow
 from .scrape import Scraper
 
-IMPLEMENTED_STEPS = ["scrape", "extract", "qualify"]
+IMPLEMENTED_STEPS = ["scrape", "extract", "qualify", "poc", "pains", "draft", "send"]
+OUTREACH_DECISIONS = ("GO", "GO_FLAGGED")
 MAX_UNIT_RETRIES = 3
 
 
@@ -27,12 +28,15 @@ def _page_summary(p) -> Dict[str, Any]:
 
 class Pipeline:
     def __init__(self, settings: Settings, store, scraper: Optional[Scraper] = None,
-                 extractor=None, researcher=None):
+                 extractor=None, researcher=None, poc_finder=None, messenger=None, sender=None):
         self.settings = settings
         self.store = store
         self.scraper = scraper or Scraper(delay=settings.scrape_delay, jina_fallback=settings.jina_fallback)
         self.extractor = extractor    # created lazily so `--until scrape` needs no API key
         self.researcher = researcher
+        self.poc_finder = poc_finder
+        self.messenger = messenger
+        self.sender = sender          # callable(subject, body, domain) -> SendResult; default: Gmail
 
     def _record(self, domain: str, step: str, status: str, started, **kw) -> StepRecord:
         rec = StepRecord(run_id=self.store.run_id, domain=domain, step=step, status=status,
@@ -55,7 +59,7 @@ class Pipeline:
 
     # ------------------------------------------------------------------ one unit of work
 
-    def advance(self, domain: str, until: str = "qualify") -> Dict[str, Any]:
+    def advance(self, domain: str, until: str = "send") -> Dict[str, Any]:
         stop_at = STEP_ORDER.index(until)
         scrape_rec = self.store.read_step(domain, "scrape")
 
@@ -105,7 +109,9 @@ class Pipeline:
         from .research import LoopState
         q_rec = self.store.read_step(domain, "qualify")
         if q_rec is not None and q_rec.status == "ok":
-            return {"stage": "qualify", "done": True, "message": q_rec.note}
+            if stop_at == 2:
+                return {"stage": "qualify", "done": True, "message": q_rec.note}
+            return self._outreach(domain, stop_at, q_rec)
         if q_rec is not None and q_rec.status == "error" and self._retry_info(q_rec) >= MAX_UNIT_RETRIES:
             return {"stage": "qualify", "done": True, "message": q_rec.error}
         state_json = (q_rec.output or {}).get("state") if q_rec else None
@@ -141,12 +147,99 @@ class Pipeline:
                              "llm_calls": res["llm_calls"], "downgraded": res["downgraded"]},
                      note=f"{q.decision} (score {q.weighted_score}) after {res['fetches_used']}/{res['fetch_cap']} "
                           f"fetches" + (f"; stopped: {q.short_circuit}" if q.short_circuit else ""))
-        return {"stage": "qualify", "done": True, "message": f"{q.decision} (score {q.weighted_score})",
-                "decision": q.decision}
+        return {"stage": "qualify", "done": stop_at == 2 or q.decision not in OUTREACH_DECISIONS,
+                "message": f"{q.decision} (score {q.weighted_score})", "decision": q.decision}
+
+    # ------------------------------------------------------------------ steps 4-7
+
+    def _outreach(self, domain: str, stop_at: int, q_rec: StepRecord) -> Dict[str, Any]:
+        from .messaging import send_footer
+        from .models import Contact, EmailDraft, PainPoints, PocSelection
+        qual = Qualification.model_validate(q_rec.output["qualification"])
+        profile = CompanyProfile.model_validate(q_rec.output["profile"])
+        if qual.decision not in OUTREACH_DECISIONS:
+            return {"stage": "qualify", "done": True, "message": f"{qual.decision}: no outreach"}
+
+        # Step 4 - point of contact (deterministic ranking, no model)
+        poc_rec = self.store.read_step(domain, "poc")
+        if poc_rec is None:
+            started = utcnow()
+            sel = self.poc_finder.find(domain)
+            self._record(domain, "poc", "ok" if sel.chosen else "stopped", started,
+                         inputs={"source": "hunter domain-search, then manual Apollo list"},
+                         output=sel.model_dump(mode="json"), note=sel.reason)
+            return {"stage": "poc", "done": sel.chosen is None or stop_at == 3, "message": sel.reason}
+        if poc_rec.status != "ok" or stop_at == 3:
+            return {"stage": "poc", "done": True, "message": poc_rec.note}
+        contact = Contact.model_validate(poc_rec.output["chosen"])
+
+        # Step 5 - two pain points
+        pains_rec = self.store.read_step(domain, "pains")
+        if pains_rec is None or pains_rec.status == "error":
+            if pains_rec is not None and self._retry_info(pains_rec) >= MAX_UNIT_RETRIES:
+                return {"stage": "pains", "done": True, "message": pains_rec.error}
+            started = utcnow()
+            try:
+                pains, report = self.messenger.pains(profile, qual, contact)
+            except Exception as e:
+                return self._llm_failure(domain, "pains", started, e, pains_rec)
+            self._record(domain, "pains", "ok", started, model=report["llm"]["model"], prompt_version=PROMPT_VERSION,
+                         inputs={"contact": contact.model_dump(mode="json")},
+                         output={"pains": pains.model_dump(mode="json"), "report": report},
+                         note="; ".join(p.title for p in pains.pains))
+            return {"stage": "pains", "done": stop_at == 4, "message": "; ".join(p.title for p in pains.pains)}
+        if stop_at == 4:
+            return {"stage": "pains", "done": True, "message": pains_rec.note}
+        pains = PainPoints.model_validate(pains_rec.output["pains"])
+
+        # Step 6 - draft
+        draft_rec = self.store.read_step(domain, "draft")
+        if draft_rec is None or draft_rec.status == "error":
+            if draft_rec is not None and self._retry_info(draft_rec) >= MAX_UNIT_RETRIES:
+                return {"stage": "draft", "done": True, "message": draft_rec.error}
+            started = utcnow()
+            try:
+                draft, report = self.messenger.draft(profile, contact, pains)
+            except Exception as e:
+                return self._llm_failure(domain, "draft", started, e, draft_rec)
+            warns = [c["check"] for c in report["checks"] if c["severity"] == "warn"]
+            self._record(domain, "draft", "ok", started, model=report["llm"]["model"], prompt_version=PROMPT_VERSION,
+                         inputs={"contact": contact.first_name, "pains": [p.title for p in pains.pains]},
+                         output={"draft": draft.model_dump(mode="json"), "report": report},
+                         note=f"subject: {draft.subject}" + (f"; warnings: {warns}" if warns else ""))
+            return {"stage": "draft", "done": stop_at == 5, "message": f"subject: {draft.subject}"}
+        if stop_at == 5:
+            return {"stage": "draft", "done": True, "message": draft_rec.note}
+        draft = EmailDraft.model_validate(draft_rec.output["draft"])
+
+        # Step 7 - send (to the hardcoded recipient only; never twice)
+        send_rec = self.store.read_step(domain, "send")
+        if send_rec is not None and send_rec.status == "ok":
+            return {"stage": "send", "done": True, "message": send_rec.note}
+        started = utcnow()
+        if self.settings.review_before_send:
+            self._record(domain, "send", "skipped", started, note="REVIEW_BEFORE_SEND=true: draft held for review")
+            return {"stage": "send", "done": True, "message": "held for review"}
+        if self.sender is None and not self.settings.gmail_ready:
+            self._record(domain, "send", "skipped", started,
+                         note="Gmail is not configured (GMAIL_TOKEN_JSON or SMTP app password); draft ready, not sent")
+            return {"stage": "send", "done": True, "message": "draft ready; Gmail not configured, not sent"}
+        send = self.sender or self._gmail_send
+        res = send(draft.subject, draft.body + send_footer(draft, contact), domain)
+        self._record(domain, "send", "ok" if res.sent else "error", started,
+                     inputs={"subject": draft.subject, "intended_for": draft.to_name},
+                     output=res.model_dump(mode="json"), error=res.error,
+                     note=f"sent to {res.recipient} ({res.mode})" if res.sent else None)
+        return {"stage": "send", "done": True,
+                "message": f"sent to {res.recipient}" if res.sent else f"send failed: {res.error}"}
+
+    def _gmail_send(self, subject: str, body: str, domain: str):
+        from .gmail_client import send_email
+        return send_email(self.settings, subject, body, domain=domain)
 
     # ------------------------------------------------------------------ whole domain
 
-    def run_domain(self, domain: str, until: str = "qualify", retry_wait: float = 5.0,
+    def run_domain(self, domain: str, until: str = "send", retry_wait: float = 5.0,
                    max_units: int = 30) -> Dict[str, Any]:
         for _ in range(max_units):
             r = self.advance(domain, until)
@@ -166,21 +259,28 @@ class Pipeline:
             if step == "qualify" and rec.status == "ok":
                 out["profile"] = CompanyProfile.model_validate(rec.output["profile"])
                 out["qualification"] = Qualification.model_validate(rec.output["qualification"])
+            if step == "draft" and rec.status == "ok":
+                out["draft"] = rec.output["draft"]
         return out
 
-    def run(self, domains: List[str], until: str = "qualify") -> List[Dict[str, Any]]:
+    def run(self, domains: List[str], until: str = "send") -> List[Dict[str, Any]]:
         return [self.run_domain(d, until) for d in domains]
 
 
-def build_pipeline(settings: Settings, store, until: str = "qualify", client=None) -> Pipeline:
+def build_pipeline(settings: Settings, store, until: str = "send", client=None) -> Pipeline:
     """Wire the real components. Raises if the LLM client cannot be created."""
     scraper = Scraper(delay=settings.scrape_delay, jina_fallback=settings.jina_fallback)
-    extractor = researcher = None
+    extractor = researcher = messenger = None
     if until != "scrape":
         from .extract import Extractor
         from .llm import make_llm
+        from .messaging import Messenger
         from .research import Researcher
         extractor = Extractor(make_llm(settings, "extract", client=client))
+        qualify_llm = make_llm(settings, "qualify", client=client)
         researcher = Researcher(load_scorecard(settings.icp_path), scraper, extractor,
-                                make_llm(settings, "qualify", client=client), max_fetches=settings.agent_max_rounds)
-    return Pipeline(settings, store, scraper=scraper, extractor=extractor, researcher=researcher)
+                                qualify_llm, max_fetches=settings.agent_max_rounds)
+        messenger = Messenger(qualify_llm)
+    from .poc import PocFinder
+    return Pipeline(settings, store, scraper=scraper, extractor=extractor, researcher=researcher,
+                    poc_finder=PocFinder(settings.hunter_api_key, settings.manual_pocs_path), messenger=messenger)

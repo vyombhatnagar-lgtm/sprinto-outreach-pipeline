@@ -53,6 +53,12 @@ class Settings:
         return HARDCODED_RECIPIENT
 
     @property
+    def gmail_ready(self) -> bool:
+        if self.gmail_mode == "smtp":
+            return bool(self.gmail_sender and self.gmail_app_password)
+        return bool(os.getenv("GMAIL_TOKEN_JSON")) or (self.secrets_dir / "token.json").exists()
+
+    @property
     def llm_ready(self) -> bool:
         return bool(self.gemini_api_key if self.provider == "gemini" else self.anthropic_api_key)
 

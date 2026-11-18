@@ -80,7 +80,11 @@ def cmd_init_run(args) -> int:
 
 def cmd_gmail_auth(_args) -> int:
     from .gmail_client import authorize
-    print(authorize(load_settings()))
+    s = load_settings()
+    print(authorize(s))
+    if s.gmail_mode == "oauth":
+        print("For Vercel: add an environment variable GMAIL_TOKEN_JSON whose value is the full contents of "
+              f"{s.secrets_dir / 'token.json'} (it is a secret - paste it yourself).")
     return 0
 
 
@@ -138,6 +142,9 @@ def cmd_run(args) -> int:
             _print_profile(res["profile"])
         if "qualification" in res:
             _print_qualification(res["qualification"])
+        if "draft" in res:
+            print(f"      email to {res['draft']['to_name']}: {res['draft']['subject']}")
+            print("      " + res["draft"]["body"].replace("\n", "\n      "))
         print()
     print(f"Trace: {store.location}")
     return 0
@@ -154,8 +161,8 @@ def main(argv=None) -> int:
     sub.add_parser("gmail-test", help=f"send a test email to {HARDCODED_RECIPIENT}").set_defaults(fn=cmd_gmail_test)
     rr = sub.add_parser("run", help="run the pipeline on a domains file")
     rr.add_argument("domains")
-    rr.add_argument("--until", choices=["scrape", "extract", "qualify"], default="qualify",
-                    help="last step to run (more steps land in later phases)")
+    rr.add_argument("--until", choices=["scrape", "extract", "qualify", "poc", "pains", "draft", "send"],
+                    default="send", help="last step to run")
     rr.set_defaults(fn=cmd_run)
     args = p.parse_args(argv)
     return args.fn(args)

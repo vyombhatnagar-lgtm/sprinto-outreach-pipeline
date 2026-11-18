@@ -10,10 +10,9 @@ The recipient is **hardcoded** to `vyom_bhatnagar@pg27.mesaschool.co`, as the ca
 | 1 | Steps 1-2: scrape and extract | done |
 | 2 | Step 3: qualify with the L4 evidence-map research loop | done (offline tests; live run needs an Anthropic key) |
 | - | Web dashboard (Vercel) + Postgres trace store (Neon) | done |
-| 3 | Step 4: Hunter PoC and Apollo fallback | next |
-| 4 | Steps 5-6: pain points and draft | |
-| 5 | Step 7 wired into the pipeline | |
-| 6 | Batch hardening | |
+| 3 | Step 4: Hunter PoC (code-ranked buyer persona) and Apollo fallback | done |
+| 4 | Steps 5-6: evidence-backed pain points and checked draft | done |
+| 5 | Step 7: Gmail send to the hardcoded inbox, once per domain | done |
 
 ## How steps 1-3 work (follows MESA L4, "Data Acquisition & Agent Loops")
 1. **Scrape** - a single-fetch scraper: the homepage only. Request-based first; if the cleaned text is under 200 words (usually a JavaScript-rendered page) it is re-read through Jina Reader. Cleaning drops nav/footers, lines under 8 words unless they carry a buying signal ("SOC 2 Type II"), and duplicates, and caps each page at ~1,500 tokens. robots.txt is respected and requests are spaced out. A blocked site (403/429) is logged and skipped, never worked around.
@@ -50,9 +49,15 @@ cp .env.example .env            # fill in keys
 
 | `gmail-auth` / `gmail-test` | Authorises Gmail once / sends a self-test email |
 
+## Steps 4-7 (only for GO / GO_FLAGGED, so a NO_GO never spends a Hunter search)
+4. **Point of contact** (`outreach/poc.py`) - Hunter Domain Search, then a manual Apollo contact (`MANUAL_POCS_JSON`). A fixed rule in code picks the buyer: security/compliance owner > CTO/VP Eng > founder/CEO > other senior eng leader; sales/marketing/HR/support never. The reason is stored.
+5. **Pain points** (`outreach/messaging.py`) - two, each tied to profile fields with verified quotes; unsupported ones are rejected.
+6. **Draft** - greets the contact by first name, opens with a hook the company itself published, covers both pains. Code checks: name, no placeholders, hook has evidence (blocking); length, pain coverage, subject (warnings).
+7. **Send** - `send_email()` can only address `HARDCODED_RECIPIENT`; a footer says who the email was intended for; a domain is never sent twice. Without Gmail configured the draft is kept and the send is marked skipped.
+
 ## Web dashboard (Vercel + Neon)
 `app.py` is a FastAPI app. Vercel deploys it as one function (`vercel.json` allows 300 s per request; each domain is its own request).
-Environment variables on Vercel: `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`), `DATABASE_URL` (set by the Neon integration), and optionally `APP_PASSWORD` to lock the dashboard (HTTP Basic, any username). Without `APP_PASSWORD` the dashboard is open to anyone with the URL.
+Environment variables on Vercel: `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`), `HUNTER_API_KEY`, Gmail (`GMAIL_MODE=smtp` + `GMAIL_SENDER` + `GMAIL_APP_PASSWORD`, or `GMAIL_TOKEN_JSON` = contents of `secrets/token.json` after `gmail-auth`), optional `MANUAL_POCS_JSON`, `DATABASE_URL` (set by the Neon integration), and optionally `APP_PASSWORD` to lock the dashboard (HTTP Basic, any username). Without `APP_PASSWORD` the dashboard is open to anyone with the URL.
 With `DATABASE_URL` set, traces go to Postgres tables `runs` and `steps`; without it, to `runs/` on disk.
 Run it locally with `.venv/bin/uvicorn app:app --reload` and `APP_PASSWORD=...` in `.env`.
 

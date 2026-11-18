@@ -4,6 +4,8 @@
 HARDCODED_RECIPIENT, and `_guard` re-checks the built message before it leaves.
 """
 import base64
+import json
+import os
 import smtplib
 from email.mime.text import MIMEText
 from email.utils import make_msgid
@@ -47,6 +49,12 @@ def _oauth_service(settings: Settings, interactive: bool = True):
     creds_file = settings.secrets_dir / "credentials.json"
     token_file = settings.secrets_dir / "token.json"
     creds = None
+    env_token = os.getenv("GMAIL_TOKEN_JSON", "")
+    if env_token:  # serverless (Vercel): the token from `gmail-auth`, stored as an env var
+        creds = Credentials.from_authorized_user_info(json.loads(env_token), SCOPES)
+        if not creds.valid:
+            creds.refresh(Request())
+        return build("gmail", "v1", credentials=creds, cache_discovery=False)
     if token_file.exists():
         creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
     if creds and creds.expired and creds.refresh_token:
@@ -84,14 +92,16 @@ def send_email(settings: Settings, subject: str, body: str, domain: Optional[str
             with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as s:
                 s.login(settings.gmail_sender, settings.gmail_app_password)
                 s.send_message(msg, to_addrs=[HARDCODED_RECIPIENT])
-            message_id = msg["Message-ID"]
+            message_id, thread_id = msg["Message-ID"], None
         else:
             service = _oauth_service(settings, interactive=False)
             raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
             resp = service.users().messages().send(userId="me", body={"raw": raw}).execute()
             message_id = resp.get("id")
+            thread_id = resp.get("threadId")
         return SendResult(domain=domain or "-", sent=True, recipient=HARDCODED_RECIPIENT,
-                          mode=settings.gmail_mode, message_id=message_id)
+                          mode=settings.gmail_mode, message_id=message_id,
+                          thread_id=thread_id)
     except RecipientGuardError:
         raise
     except Exception as e:  # recorded in the trace rather than crashing a batch run

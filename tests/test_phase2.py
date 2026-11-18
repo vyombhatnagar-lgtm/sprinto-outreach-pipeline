@@ -110,7 +110,7 @@ def test_full_pipeline_writes_three_steps(tmp_path):
     sc = scraper()
     ex = Extractor(FakeLLM(page_aware_extraction))
     pipe = Pipeline(load_settings(), store, scraper=sc, extractor=ex, researcher=Researcher(CARD, sc, ex, qualifier()))
-    res = pipe.run_domain("acme.io")
+    res = pipe.run_domain("acme.io", until="qualify")
     assert store.completed_steps("acme.io") == ["scrape", "extract", "qualify"]
     rec = store.read_step("acme.io", "qualify")
     assert rec.output["qualification"]["decision"] == res["qualification"].decision
@@ -275,7 +275,7 @@ def test_advance_does_one_unit_per_call(tmp_path):
     pipe, store = _pipe(tmp_path)
     stages = []
     for _ in range(10):
-        r = pipe.advance("acme.io")
+        r = pipe.advance("acme.io", until="qualify")
         stages.append(r["stage"])
         if r["done"]:
             break
