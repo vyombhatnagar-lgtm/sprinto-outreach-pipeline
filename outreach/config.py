@@ -35,9 +35,6 @@ class Settings:
     gemini_extract_model: str
     gemini_fallback_model: str
     hunter_api_key: str
-    gmail_mode: str
-    gmail_sender: str
-    gmail_app_password: str
     agent_max_rounds: int
     review_before_send: bool
     jina_fallback: bool
@@ -52,10 +49,10 @@ class Settings:
     def recipient(self) -> str:
         return HARDCODED_RECIPIENT
 
+    gmail_mode = "oauth"  # the only transport: no SMTP / app passwords
+
     @property
     def gmail_ready(self) -> bool:
-        if self.gmail_mode == "smtp":
-            return bool(self.gmail_sender and self.gmail_app_password)
         return bool(os.getenv("GMAIL_TOKEN_JSON")) or (self.secrets_dir / "token.json").exists()
 
     @property
@@ -91,9 +88,6 @@ def load_settings() -> Settings:
         gemini_extract_model=os.getenv("GEMINI_EXTRACT_MODEL", "") or os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
         gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.7-flash"),  # used on retries when the main model is busy
         hunter_api_key=os.getenv("HUNTER_API_KEY", ""),
-        gmail_mode=os.getenv("GMAIL_MODE", "oauth").strip().lower(),
-        gmail_sender=os.getenv("GMAIL_SENDER", ""),
-        gmail_app_password=os.getenv("GMAIL_APP_PASSWORD", ""),
         agent_max_rounds=int(os.getenv("AGENT_MAX_ROUNDS", "4")),
         review_before_send=_bool(os.getenv("REVIEW_BEFORE_SEND", "false")),
         jina_fallback=_bool(os.getenv("JINA_FALLBACK", "true")),

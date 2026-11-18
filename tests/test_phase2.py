@@ -141,7 +141,6 @@ def test_pg_store_roundtrip(tmp_path):
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("APP_PASSWORD", "pw")
     monkeypatch.setenv("RUNS_DIR", str(tmp_path))
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("POSTGRES_URL", raising=False)
@@ -149,21 +148,14 @@ def client(tmp_path, monkeypatch):
     return TestClient(webapp.app)
 
 
-def test_web_requires_password(client):
-    assert client.get("/").status_code == 401
-    assert client.get("/", auth=("x", "wrong")).status_code == 401
-    assert client.get("/", auth=("x", "pw")).status_code == 200
-    assert client.get("/healthz").json()["ok"] is True
-
-
-def test_web_open_without_password(client, monkeypatch):
-    monkeypatch.delenv("APP_PASSWORD")
+def test_web_is_open_and_has_no_password_settings(client):
     assert client.get("/").status_code == 200
+    h = client.get("/healthz").json()
+    assert h["ok"] is True and h["gmail_mode"] == "oauth" and "app_password_set" not in h
 
 
 def test_web_creates_run_and_renders_trace(client, tmp_path):
-    r = client.post("/api/runs", json={"domains": ["https://www.Acme.io/", "acme.io"], "until": "qualify"},
-                    auth=("x", "pw"))
+    r = client.post("/api/runs", json={"domains": ["https://www.Acme.io/", "acme.io"], "until": "qualify"})
     assert r.status_code == 200 and r.json()["domains"] == ["acme.io"]
     run_id = r.json()["run_id"]
     # write a qualify record as the pipeline would, then render
@@ -172,13 +164,13 @@ def test_web_creates_run_and_renders_trace(client, tmp_path):
     store.write_step(StepRecord(run_id=run_id, domain="acme.io", step="qualify", status="ok", started_at=utcnow(),
                                 output={"qualification": out["qualification"].model_dump(mode="json"),
                                         "profile": out["profile"].model_dump(mode="json")}))
-    page = client.get(f"/runs/{run_id}", auth=("x", "pw"))
+    page = client.get(f"/runs/{run_id}")
     assert page.status_code == 200 and "GO" in page.text and "Research loop" in page.text
-    assert client.get(f"/api/runs/{run_id}/domains/acme.io/steps/qualify", auth=("x", "pw")).status_code == 200
+    assert client.get(f"/api/runs/{run_id}/domains/acme.io/steps/qualify").status_code == 200
 
 
 def test_web_rejects_too_many_domains(client):
-    r = client.post("/api/runs", json={"domains": [f"d{i}.com" for i in range(16)]}, auth=("x", "pw"))
+    r = client.post("/api/runs", json={"domains": [f"d{i}.com" for i in range(16)]})
     assert r.status_code == 400
 
 

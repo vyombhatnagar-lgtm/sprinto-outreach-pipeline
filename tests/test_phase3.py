@@ -1,3 +1,4 @@
+import dataclasses
 """Offline tests for steps 4-7: contact ranking, pain points, draft checks, send guard."""
 import httpx
 import pytest
@@ -170,10 +171,9 @@ def test_no_go_spends_no_hunter_search(tmp_path):
 
 
 def test_unconfigured_gmail_keeps_the_draft_and_skips_send(tmp_path, monkeypatch):
-    monkeypatch.setenv("GMAIL_MODE", "smtp")
-    monkeypatch.delenv("GMAIL_APP_PASSWORD", raising=False)
+    monkeypatch.delenv("GMAIL_TOKEN_JSON", raising=False)
     pipe, store = full_pipe(tmp_path, None)
-    pipe.settings = load_settings()
+    pipe.settings = dataclasses.replace(load_settings(), secrets_dir=tmp_path / "no-secrets")
     pipe.run_domain("acme.io")
     assert store.read_step("acme.io", "send").status == "skipped"
     assert store.read_step("acme.io", "draft").status == "ok"

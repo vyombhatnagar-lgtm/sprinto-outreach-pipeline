@@ -1,15 +1,13 @@
 """Web dashboard (Vercel entrypoint: Vercel looks for a FastAPI instance named `app` here).
 
-If APP_PASSWORD is set, every page needs HTTP Basic auth (any username + that
-password). If it is not set, the dashboard is open to anyone with the URL. Each domain runs in its own request so one request stays
-well inside the function time limit; the browser walks the list.
+No passwords: the dashboard is open to anyone with the URL (owner's choice). Each domain
+runs in its own request so one request stays well inside the function time limit; the
+browser walks the list.
 """
 import os
-import secrets
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 from outreach import web
@@ -20,17 +18,7 @@ from outreach.pipeline import IMPLEMENTED_STEPS, build_pipeline
 from outreach.trace import open_store
 
 app = FastAPI(title="Sprinto Outreach Pipeline", docs_url=None, redoc_url=None)
-basic = HTTPBasic(auto_error=False)
 MAX_DOMAINS = 15  # the case: 8-15 companies a week
-
-
-def require_auth(creds: HTTPBasicCredentials = Depends(basic)) -> None:
-    password = os.getenv("APP_PASSWORD", "")
-    if not password:
-        return  # open dashboard (owner's choice); set APP_PASSWORD to lock it
-    if creds is None or not secrets.compare_digest(creds.password.encode(), password.encode()):
-        raise HTTPException(401, "Sign in with any username and the APP_PASSWORD.",
-                            headers={"WWW-Authenticate": 'Basic realm="outreach"'})
 
 
 @app.get("/healthz")
@@ -42,13 +30,12 @@ def healthz():
     except Exception as e:  # report the failure class, never the connection string
         store_ok = f"error: {type(e).__name__}"
     return {"ok": True, "store": "postgres" if s.database_url else "files", "store_ok": store_ok,
-            "app_password_set": bool(os.getenv("APP_PASSWORD")),
             "llm_provider": s.provider, "llm_key_set": s.llm_ready,
             "hunter_key_set": bool(s.hunter_api_key), "gmail_ready": s.gmail_ready, "gmail_mode": s.gmail_mode, "recipient": HARDCODED_RECIPIENT,
             "prompt_version": PROMPT_VERSION}
 
 
-@app.get("/api/models", dependencies=[Depends(require_auth)])
+@app.get("/api/models")
 def gemini_models():
     """Which Gemini models this key can call (names only), to pick a model or fallback."""
     import httpx
@@ -64,7 +51,7 @@ def gemini_models():
     return {"current": s.gemini_model, "fallback": s.gemini_fallback_model or None, "models": models}
 
 
-@app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+@app.get("/", response_class=HTMLResponse)
 def home():
     s = load_settings()
     runs = open_store(s).list_runs()
@@ -76,7 +63,7 @@ class NewRun(BaseModel):
     until: str = "send"
 
 
-@app.post("/api/runs", dependencies=[Depends(require_auth)])
+@app.post("/api/runs")
 def create_run(body: NewRun):
     if body.until not in IMPLEMENTED_STEPS:
         raise HTTPException(400, f"until must be one of {IMPLEMENTED_STEPS}")
@@ -94,7 +81,7 @@ def create_run(body: NewRun):
     return {"run_id": store.run_id, "domains": domains}
 
 
-@app.post("/api/runs/{run_id}/domains/{domain}/advance", dependencies=[Depends(require_auth)])
+@app.post("/api/runs/{run_id}/domains/{domain}/advance")
 def advance_domain(run_id: str, domain: str, until: str = "send"):
     """Do one unit of work for one domain (scrape, extract, one loop fetch, or final scoring)."""
     s = load_settings()
@@ -112,7 +99,7 @@ def advance_domain(run_id: str, domain: str, until: str = "send"):
     return {"domain": domain, **pipe.advance(domain, until)}
 
 
-@app.get("/runs/{run_id}", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+@app.get("/runs/{run_id}", response_class=HTMLResponse)
 def run_view(run_id: str):
     store = open_store(load_settings(), run_id)
     manifest = store.read_manifest()
@@ -122,7 +109,7 @@ def run_view(run_id: str):
     return web.run_page(manifest, records)
 
 
-@app.get("/api/runs/{run_id}/domains/{domain}/steps/{step}", dependencies=[Depends(require_auth)])
+@app.get("/api/runs/{run_id}/domains/{domain}/steps/{step}")
 def step_json(run_id: str, domain: str, step: str):
     if step not in STEP_ORDER:
         raise HTTPException(404, "Unknown step")

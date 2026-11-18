@@ -37,7 +37,7 @@ cp .env.example .env            # fill in keys
 
 ### Gmail (step 7)
 - **OAuth (default):** in Google Cloud, enable the Gmail API and create an OAuth client of type *Desktop*. Save its JSON as `secrets/credentials.json`, then run `python -m outreach gmail-auth` once.
-- **SMTP fallback:** use this if your school Workspace blocks OAuth. Set `GMAIL_MODE=smtp`, `GMAIL_SENDER` and `GMAIL_APP_PASSWORD` (this needs 2-Step Verification).
+- No passwords anywhere: there is no SMTP/app-password mode and no dashboard password.
 - `python -m outreach gmail-test` sends one test email to the hardcoded address.
 
 ## Commands
@@ -57,9 +57,9 @@ cp .env.example .env            # fill in keys
 
 ## Web dashboard (Vercel + Neon)
 `app.py` is a FastAPI app. Vercel deploys it as one function (`vercel.json` allows 300 s per request; each domain is its own request).
-Environment variables on Vercel: `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`), `HUNTER_API_KEY`, Gmail (`GMAIL_MODE=smtp` + `GMAIL_SENDER` + `GMAIL_APP_PASSWORD`, or `GMAIL_TOKEN_JSON` = contents of `secrets/token.json` after `gmail-auth`), optional `MANUAL_POCS_JSON`, `DATABASE_URL` (set by the Neon integration), and optionally `APP_PASSWORD` to lock the dashboard (HTTP Basic, any username). Without `APP_PASSWORD` the dashboard is open to anyone with the URL.
+Environment variables on Vercel: `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`), `HUNTER_API_KEY`, `GMAIL_TOKEN_JSON` (contents of `secrets/token.json` after `gmail-auth`; without it drafts are kept and not sent), optional `MANUAL_POCS_JSON`, and `DATABASE_URL` (set by the Neon integration). The dashboard has no password and is open to anyone with the URL.
 With `DATABASE_URL` set, traces go to Postgres tables `runs` and `steps`; without it, to `runs/` on disk.
-Run it locally with `.venv/bin/uvicorn app:app --reload` and `APP_PASSWORD=...` in `.env`.
+Run it locally with `.venv/bin/uvicorn app:app --reload`.
 
 ## How decisions stay traceable
 - `config/icp.yaml` is the scorecard. Each criterion is tagged with its origin (case, whiteboard or recommendation).

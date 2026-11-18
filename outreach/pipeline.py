@@ -222,7 +222,7 @@ class Pipeline:
             return {"stage": "send", "done": True, "message": "held for review"}
         if self.sender is None and not self.settings.gmail_ready:
             self._record(domain, "send", "skipped", started,
-                         note="Gmail is not configured (GMAIL_TOKEN_JSON or SMTP app password); draft ready, not sent")
+                         note="Gmail is not configured (no GMAIL_TOKEN_JSON); draft ready, not sent")
             return {"stage": "send", "done": True, "message": "draft ready; Gmail not configured, not sent"}
         send = self.sender or self._gmail_send
         res = send(draft.subject, draft.body + send_footer(draft, contact), domain)

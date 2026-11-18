@@ -48,17 +48,9 @@ def cmd_doctor(_args) -> int:
 
     print(OK if s.hunter_api_key else WARN, "HUNTER_API_KEY " + ("set" if s.hunter_api_key else "missing (needed in Phase 3, or use data/manual_pocs.json)"))
 
-    if s.gmail_mode == "oauth":
-        has_client = (s.secrets_dir / "credentials.json").exists()
-        has_token = (s.secrets_dir / "token.json").exists()
-        print(OK if has_client else WARN, "Gmail OAuth client secrets/credentials.json " + ("found" if has_client else "missing"))
-        print(OK if has_token else WARN, "Gmail token " + ("found" if has_token else "missing - run: python -m outreach gmail-auth"))
-    elif s.gmail_mode == "smtp":
-        ready = bool(s.gmail_sender and s.gmail_app_password)
-        print(OK if ready else WARN, "Gmail SMTP " + ("configured" if ready else "needs GMAIL_SENDER + GMAIL_APP_PASSWORD"))
-    else:
-        print(FAIL, f"GMAIL_MODE must be oauth or smtp, got {s.gmail_mode!r}")
-        failures += 1
+    has_client = (s.secrets_dir / "credentials.json").exists()
+    print(OK if has_client else WARN, "Gmail OAuth client secrets/credentials.json " + ("found" if has_client else "missing"))
+    print(OK if s.gmail_ready else WARN, "Gmail token " + ("found" if s.gmail_ready else "missing - run: python -m outreach gmail-auth"))
 
     print("\nDoctor:", "FAILED" if failures else "OK (warnings are setup still to do)")
     return 1 if failures else 0
@@ -82,9 +74,8 @@ def cmd_gmail_auth(_args) -> int:
     from .gmail_client import authorize
     s = load_settings()
     print(authorize(s))
-    if s.gmail_mode == "oauth":
-        print("For Vercel: add an environment variable GMAIL_TOKEN_JSON whose value is the full contents of "
-              f"{s.secrets_dir / 'token.json'} (it is a secret - paste it yourself).")
+    print("For Vercel: add an environment variable GMAIL_TOKEN_JSON whose value is the full contents of "
+          f"{s.secrets_dir / 'token.json'} (it is a secret - paste it yourself).")
     return 0
 
 
