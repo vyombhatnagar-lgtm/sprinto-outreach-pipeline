@@ -128,7 +128,9 @@ def rule_text(card: Scorecard) -> str:
 
 
 def decide(card: Scorecard, scores: List[CriterionScore], short_circuit: Optional[str] = None,
-           extra_flags: Optional[List[str]] = None) -> Decision:
+           extra_flags: Optional[List[str]] = None, hold: Optional[str] = None) -> Decision:
+    """hold: a code check found a contradiction (e.g. a page mentions SOC 2 but no certification was
+    extracted). Anything that would otherwise qualify goes to a human instead."""
     by_id = {s.criterion_id: s for s in scores}
     missing = [cid for cid in card.ids if cid not in by_id]
     if missing:
@@ -175,6 +177,9 @@ def decide(card: Scorecard, scores: List[CriterionScore], short_circuit: Optiona
             return out("MANUAL_REVIEW")
     elif unknown_share > card.max_unknown_share:
         flags.append(f"{unknown_share:.0%} of the scorecard weight is unknown")
+        return out("MANUAL_REVIEW")
+    if hold:
+        flags.append(hold)
         return out("MANUAL_REVIEW")
     if score >= card.go_threshold:
         return out("GO_FLAGGED" if flags else "GO")

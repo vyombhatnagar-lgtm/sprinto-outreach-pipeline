@@ -344,3 +344,30 @@ def test_gemini_skips_a_retired_model():
                     fallback_model="new", sleep=lambda s: None)
     llm.structured(system="s", user="u", output_model=_Scores)
     assert used == ["old", "new"]
+
+
+def test_trust_page_cards_keep_their_certification_line():
+    # ilovepdf.com: the ISO 27001 claim sits in a card <div> that main-content extraction dropped
+    from outreach.scrape import html_to_text
+    filler = "".join(f"<p>We take security seriously and review our policies paragraph {i} with care every year.</p>"
+                     for i in range(40))
+    html = (f"<html><body><article><h1>Security</h1>{filler}</article><div class='row'><div class='infocard'>"
+            "<div class='infocard__body'>Acme proudly holds ISO/IEC 27001:2022 certification, renewed this year."
+            "</div></div></div></body></html>")
+    assert "ISO/IEC 27001:2022" in html_to_text(html)
+
+
+def test_cap_keeps_key_lines_when_page_is_long():
+    from outreach.scrape import MAX_CHARS_PER_PAGE, clean_text
+    long = "\n".join(f"This is an ordinary sentence about our product number {i} and its many features." for i in range(200))
+    out = clean_text(long + "\nWe are SOC 2 Type II certified and audited every year by a firm.")
+    assert len(out) <= MAX_CHARS_PER_PAGE and "SOC 2 Type II certified" in out
+
+
+def test_unextracted_certification_is_caught():
+    from outreach.models import CompanyProfile, RawPage
+    from outreach.research import unextracted_certifications
+    prof = CompanyProfile(domain="x.com")
+    pages = [RawPage(url="https://x.com/security", page_kind="security", text="Intro\nWe hold ISO 27001 today.")]
+    assert "x.com/security" in unextracted_certifications(prof, pages)
+    assert unextracted_certifications(prof, [RawPage(url="https://x.com", page_kind="home", text="hello")]) is None

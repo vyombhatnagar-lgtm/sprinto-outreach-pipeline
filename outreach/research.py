@@ -12,6 +12,7 @@ The model never decides whether it "knows enough". A field is filled or it isn't
 The fetch cap is fixed before the run; when it is hit, unanswered questions are
 handled by their designed policy (flag, or hand to a human), never by guessing.
 """
+import re
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict
@@ -41,6 +42,22 @@ def short_circuit(profile: CompanyProfile) -> Optional[str]:
     claimed = str(profile.certifications_claimed.value or "").lower()
     if profile.certification_status.value == "certified" and "soc" in claimed and "27001" in claimed:
         return "already holds SOC 2 and ISO 27001 - nothing for Sprinto to sell"
+    return None
+
+
+_CERT = re.compile(r"\bsoc ?2\b|\biso(?:/iec)? ?27001\b", re.I)
+
+
+def unextracted_certifications(profile: CompanyProfile, pages: List[RawPage]) -> Optional[str]:
+    """Code check on the model: a page we read names SOC 2 / ISO 27001, yet no certification was extracted.
+    It may be a claim the model missed (-> already certified) or just marketing copy; a human decides."""
+    if profile.certifications_claimed.value is not None:
+        return None
+    for p in pages:
+        m = _CERT.search(p.text or "")
+        if m:
+            line = next((ln for ln in p.text.split("\n") if _CERT.search(ln)), m.group(0))
+            return f'{p.url} mentions "{line.strip()[:140]}" but no certification was extracted: check before emailing'
     return None
 
 
@@ -223,7 +240,8 @@ class Researcher:
                                         output_model=_Scores, effort="medium")
         llm_calls = st.llm_calls + [meta]
         scores, downgraded = check_scores(self.card, raw, profile)
-        d = decide(self.card, scores, short_circuit=st.stop, extra_flags=extra_flags)
+        d = decide(self.card, scores, short_circuit=st.stop, extra_flags=extra_flags,
+                   hold=unextracted_certifications(profile, st.pages))
         qual = Qualification(
             domain=scrape.domain, scores=scores, weighted_score=d.weighted_score,
             unknown_weight_share=d.unknown_weight_share, decision=d.decision, decision_rule=d.rule,

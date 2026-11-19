@@ -66,13 +66,12 @@ def pains_out(fields=("certifications_claimed",)):
                                supporting_fields=list(fields)) for i in range(2)])
 
 
-BODY = ("Hi Ana, I saw your trust page says the SOC 2 Type II audit is in progress. "
+BODY = ("Hi Ana,\n\nI saw your trust page says the SOC 2 Type II audit is in progress.\n\n"
         "Evidence collection for a first audit usually lands on engineering and eats sprint time. "
-        "Sprinto connects to your cloud and collects that evidence continuously instead. "
-        "Enterprise buyers also send security questionnaires before they sign, and those slow deals down. "
-        "Sprinto keeps answers and policies ready so reviews move faster. "
-        "Would a 15-minute call next week be useful to compare notes on your audit plan? "
-        "Best, The Sprinto team")
+        "Enterprise buyers also send security questionnaires before they sign, and those slow deals down.\n\n"
+        "Sprinto connects to your cloud, collects that evidence continuously and keeps questionnaire answers ready.\n\n"
+        "Would a 15-minute call next week be useful to compare notes on your audit plan?\n\n"
+        "Best,\nThe Sprinto team")
 
 
 def draft_out(body=BODY, hook_field="certifications_claimed"):
@@ -185,3 +184,23 @@ def test_gemini_schema_keeps_a_field_named_title():
     item = gemini_schema(_Pains)["properties"]["pains"]["items"]
     assert "title" in item["properties"] and set(item["required"]) <= set(item["properties"])
     assert "title" not in gemini_schema(_Draft)  # the model-level label is still dropped
+
+
+def test_shape_body_puts_greeting_and_signoff_on_their_own_lines():
+    from outreach.messaging import shape_body
+    out = shape_body("Hi Ana, I saw X. Pain one. Pain two. Sprinto helps. Call? Best, The Sprinto team", "Ana",
+                     "The Sprinto team")
+    assert out.startswith("Hi Ana,\n\nI saw X.") and out.endswith("Call?\n\nBest,\nThe Sprinto team")
+    assert shape_body("Hi Ana,\n\nBody.\n\nThe Sprinto team", "Ana", "The Sprinto team") == "Hi Ana,\n\nBody.\n\nThe Sprinto team"
+
+
+def test_draft_checks_flag_guesses_one_block_and_unsupported_hook():
+    prof, _ = profile_and_qual()
+    pp = PainPoints(domain="acme.io", contact_name="Ana", pains=[PainPoint(title=f"Pain {i}", why_this_person="w",
+                                                                             sprinto_answer="a") for i in range(2)])
+    bad = draft_out(body=BODY.replace("usually lands", "is likely landing").replace("\n\n", " "))
+    bad.hook = "password protection and custom roles for teams"
+    checks = {c["check"]: c["severity"] for c in check_draft(bad, ANA, prof, pp)}
+    assert checks["no guesses stated as fact"] == "warn"
+    assert checks["split into paragraphs"] == "warn"
+    assert checks["hook matches its evidence"] == "warn"

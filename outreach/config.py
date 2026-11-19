@@ -17,7 +17,7 @@ load_dotenv(ROOT / ".env")
 # Not read from env on purpose, so no config change can redirect a send.
 HARDCODED_RECIPIENT = "vyom_bhatnagar@pg27.mesaschool.co"
 
-PROMPT_VERSION = "v1"  # bumped whenever a prompt changes; recorded in every trace
+PROMPT_VERSION = "v2"  # bumped whenever a prompt changes; recorded in every trace
 
 
 def _bool(value: str) -> bool:

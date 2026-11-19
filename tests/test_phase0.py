@@ -138,3 +138,11 @@ def test_trace_roundtrip(tmp_path):
     assert path.name == "03_qualify.json"
     assert store.read_step("acme.io", "qualify").output == {"decision": "GO"}
     assert store.completed_steps("acme.io") == ["qualify"]
+
+
+def test_hold_sends_a_would_be_go_to_a_human():
+    s = scores(certification_gap="unknown", funding_stage="unknown", employee_count="unknown",
+               compliance_hiring="unknown", security_news="not_met")
+    d = decide(CARD, s, hold="page mentions ISO 27001")
+    assert d.decision == "MANUAL_REVIEW" and "page mentions ISO 27001" in d.flags
+    assert decide(CARD, scores(), short_circuit="not SaaS", hold="x").decision == "NO_GO"

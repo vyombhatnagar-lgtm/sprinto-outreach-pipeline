@@ -43,6 +43,13 @@ SIGNAL_WORDS = re.compile(
     re.I,
 )
 
+# Lines that decide a verdict. Never dropped by the main-content extractor or the length cap.
+KEY_LINES = re.compile(
+    r"soc ?2|iso(?:/iec)? ?27001|hipaa|pci[ -]?dss|gdpr|certif|attestation|audit report|trust center|"
+    r"series [a-e]\b|seed round|raised \$|funding|we.re hiring|open roles|employees",
+    re.I,
+)
+
 PAGE_KEYWORDS: Dict[str, Tuple[str, ...]] = {
     "about": ("about", "company", "who-we-are", "our-story"),
     "product": ("product", "platform", "features", "how-it-works"),
@@ -69,7 +76,9 @@ Fetcher = Callable[[str], httpx.Response]
 
 
 def clean_text(text: str) -> str:
-    """Line-level cleaning rules from L4: short lines go unless they carry a signal; no duplicates."""
+    """Line-level cleaning rules from L4: short lines go unless they carry a signal; no duplicates.
+    If the page is over the length cap, key lines (certifications, funding, hiring) are kept first,
+    then the rest fill the remaining room, all in page order."""
     seen = set()
     kept: List[str] = []
     for line in re.split(r"[\r\n]+", text):
@@ -83,18 +92,35 @@ def clean_text(text: str) -> str:
             continue
         seen.add(key)
         kept.append(line)
-    return "\n".join(kept)[:MAX_CHARS_PER_PAGE]
+    if sum(len(x) + 1 for x in kept) <= MAX_CHARS_PER_PAGE:
+        return "\n".join(kept)
+    room, keep = MAX_CHARS_PER_PAGE, set()
+    for i, line in enumerate(kept):
+        if KEY_LINES.search(line) and len(line) + 1 <= room:
+            keep.add(i)
+            room -= len(line) + 1
+    for i, line in enumerate(kept):
+        if i not in keep and len(line) + 1 <= room:
+            keep.add(i)
+            room -= len(line) + 1
+    return "\n".join(kept[i] for i in sorted(keep))
 
 
 def html_to_text(html: str) -> str:
-    """Heuristic extraction (L4 slide 13, option 2): main content region, nav and footers dropped."""
-    text = trafilatura.extract(html, include_comments=False, include_tables=True, favor_recall=True)
-    if not text or len(text) < 200:
-        soup = BeautifulSoup(html, "html.parser")
-        for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "header", "form"]):
-            tag.decompose()
-        text = soup.get_text("\n", strip=True)
-    return clean_text(text or "")
+    """Heuristic extraction (L4 slide 13, option 2): main content region, nav and footers dropped.
+    Main-content extractors throw away card and badge layouts, which is exactly where trust pages put
+    'we hold ISO 27001'. So key lines from the whole page are added back if the extractor missed them."""
+    text = trafilatura.extract(html, include_comments=False, include_tables=True, favor_recall=True) or ""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "header", "form"]):
+        tag.decompose()
+    full = soup.get_text("\n", strip=True)
+    if len(text) < 200:
+        return clean_text(full)
+    have = text.lower()
+    rescued = [ln for ln in (re.sub(r"\s+", " ", x).strip() for x in full.split("\n"))
+               if len(ln.split()) >= 4 and KEY_LINES.search(ln) and ln.lower()[:80] not in have]
+    return clean_text(text + ("\n" + "\n".join(rescued) if rescued else ""))
 
 
 def word_count(text: str) -> int:
