@@ -144,6 +144,9 @@ class GeminiLLM:
             raise LLMError("GEMINI_API_KEY is not set")
         self.model = model
         self.fallback_model = fallback_model
+        # comma-separated chain: attempt 1 = main model, attempt 2 = first fallback, ...
+        # (free-tier quotas are per model, so a quota-exhausted model is skipped, not waited on)
+        self.chain = [model] + [m.strip() for m in fallback_model.split(",") if m.strip() and m.strip() != model]
         self.api_key = api_key
         self.http = http or httpx.Client(timeout=timeout)
         self.attempts, self.timeout, self.budget, self.backoff = attempts, timeout, budget, backoff
@@ -155,7 +158,8 @@ class GeminiLLM:
         start = time.monotonic()
         last_err = "no attempt made"
         for attempt in range(1, self.attempts + 1):
-            model = self.fallback_model if (attempt >= 2 and self.fallback_model) else self.model
+            model = self.chain[min(attempt - 1, len(self.chain) - 1)]
+            quota = False
             try:
                 r = self.http.post(GEMINI_URL.format(model=model), json=body,
                                    headers={"x-goog-api-key": self.api_key}, timeout=self.timeout)
@@ -168,12 +172,15 @@ class GeminiLLM:
                     detail = ""
                 if detail:
                     last_err += f": {detail}"
+                quota = r.status_code == 429 and "quota" in detail.lower()
                 hint = _retry_after(r)
             except httpx.TimeoutException:
                 last_err, hint = f"timed out after {self.timeout:.0f}s", None
             except httpx.HTTPError as e:
                 last_err, hint = type(e).__name__, None
             wait = hint if hint is not None else self.backoff[min(attempt - 1, len(self.backoff) - 1)]
+            if attempt < len(self.chain) and (quota or wait > self.backoff[-1]):
+                wait = 1.0  # the next model in the chain has its own capacity and quota
             if attempt == self.attempts or time.monotonic() - start + wait + self.timeout > self.budget:
                 break
             self._sleep(wait)

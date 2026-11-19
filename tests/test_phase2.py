@@ -314,3 +314,17 @@ def test_gemini_honours_retry_delay():
     llm = GeminiLLM("k", "m", http=httpx.Client(transport=httpx.MockTransport(handler)), sleep=waits.append)
     llm.structured(system="s", user="u", output_model=_Scores)
     assert waits == [21.0]
+
+
+def test_gemini_skips_a_quota_exhausted_model_to_the_next_in_the_chain():
+    used, waits = [], []
+
+    def handler(req):
+        used.append(req.url.path.split("/")[-1].split(":")[0])
+        if len(used) < 3:
+            return httpx.Response(429, json={"error": {"message": "You exceeded your current quota"}})
+        return httpx.Response(200, json=_ok_scores())
+    llm = GeminiLLM("k", "m1", http=httpx.Client(transport=httpx.MockTransport(handler)),
+                    fallback_model="m2, m3", sleep=waits.append)
+    llm.structured(system="s", user="u", output_model=_Scores)
+    assert used == ["m1", "m2", "m3"] and waits == [1.0, 1.0]
