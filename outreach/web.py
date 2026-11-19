@@ -204,6 +204,53 @@ details.fold[open] summary::before{transform:rotate(90deg)}
 .progress .ok .dot{background:var(--green)}
 @keyframes pulse{50%{opacity:.3}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* run page: calm, collapsible */
+.dist{display:flex;gap:3px;height:8px;margin-top:26px;border-radius:4px;overflow:hidden}
+.dist i{display:block;min-width:6px;border-radius:2px}
+.bg-green{background:var(--green)}.bg-amber{background:var(--amber)}.bg-red{background:var(--red)}
+.bg-violet{background:var(--violet)}.bg-gray{background:var(--line-2)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:12px;font-size:13px;color:var(--ink-2)}
+.lg{display:inline-flex;align-items:center;gap:7px}.lg .dot{width:8px;height:8px;border-radius:50%}
+.lg b{color:var(--ink);font-weight:600}
+details.company{margin-top:10px;scroll-margin-top:72px;box-shadow:none}
+details.company[open]{box-shadow:var(--shadow)}
+.co-sum{list-style:none;cursor:pointer;display:grid;grid-template-columns:minmax(150px,220px) 1fr auto;align-items:center;
+  gap:16px;padding:16px 20px;border-radius:var(--r)}
+.co-sum::-webkit-details-marker{display:none}
+.co-sum:hover{background:var(--hover)}
+details[open] .co-sum{border-bottom:1px solid var(--line);border-radius:var(--r) var(--r) 0 0}
+.co-name{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.01em;min-width:0}
+.co-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.co-line{color:var(--ink-2);font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.co-right{display:flex;align-items:center;gap:12px}
+.chev{width:8px;height:8px;border-right:1.5px solid var(--ink-3);border-bottom:1.5px solid var(--ink-3);transform:rotate(-45deg);transition:transform .15s}
+details[open] .chev{transform:rotate(45deg)}
+.co-body{padding:4px 0 6px}
+.co-body>.co-meta,.co-body>.steps,.co-body>.note{margin-left:20px;margin-right:20px}
+.co-body .tabs{padding:0 14px;margin-top:14px}
+.crits{list-style:none;margin:0;padding:0}
+.crit{padding:14px 0;border-bottom:1px solid var(--line)}.crit:first-child{padding-top:0}
+.crit-h{display:flex;align-items:center;gap:10px}
+.crit-h .st{color:var(--ink);font-weight:550}.crit-h .st.c-green::before{background:var(--green)}
+.crit-h .st.c-red::before{background:var(--red)}.crit-h .st.c-amber::before{background:var(--amber)}
+.crit-w{color:var(--ink-3);font-size:12px}
+.crit-s{margin-left:auto;font-size:12.5px;font-weight:550}
+.crit p{margin:6px 0 0 14px;color:var(--ink-2);font-size:13.5px;max-width:720px}
+details.src{margin:6px 0 0 14px}details.src summary{cursor:pointer;color:var(--ink-3);font-size:12.5px;list-style:none}
+details.src summary::-webkit-details-marker{display:none}details.src summary:hover{color:var(--ink)}
+.unknowns{margin-top:16px;padding:14px 16px;border-radius:10px;background:var(--raised);font-size:13.5px;display:grid;gap:4px}
+.notes{margin:14px 0 0;padding-left:18px;color:var(--ink-3);font-size:12.5px}
+.timeline{list-style:none;margin:0;padding:0}
+.timeline li{display:flex;gap:14px;padding:0 0 18px;position:relative}
+.timeline li:not(:last-child)::before{content:"";position:absolute;left:11px;top:26px;bottom:4px;width:1px;background:var(--line-2)}
+.tl-n{width:23px;height:23px;border-radius:50%;border:1px solid var(--line-2);display:grid;place-items:center;font-size:11.5px;color:var(--ink-3);flex:none;background:var(--surface)}
+.tl-q{font-weight:550}.tl-r{color:var(--ink-3);font-size:13px;margin-top:2px}
+.kvs{display:grid;gap:0}.kv{display:grid;grid-template-columns:190px 1fr;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.kv:last-child{border-bottom:0}.kv .k{color:var(--ink-3);font-size:12px}
+.foot{margin-top:40px}
+@media (max-width:640px){.co-sum{grid-template-columns:1fr auto;gap:6px 12px;padding:14px 16px}
+  .co-line{grid-column:1/-1;grid-row:2;white-space:normal}.co-body>.co-meta,.co-body>.steps,.co-body>.note{margin-left:16px;margin-right:16px}
+  .kv{grid-template-columns:1fr;gap:2px}}
 @media (max-width:640px){main{padding:28px 16px 80px}.nav-in{padding:0 16px}h1{font-size:25px}
   .pad,.panel{padding-left:18px;padding-right:18px}.co-head{padding:18px 18px 0}.tabs{padding:0 10px}
   .recip .long{display:none}.hide-sm{display:none}.steps .step-ln{width:8px;margin:0 4px}}
@@ -399,28 +446,36 @@ def _resume(run_id: str, domain: str, label: str = "Resume") -> str:
             f'{icon("refresh", 14)}<span>{label}</span></button>')
 
 
+
 def domain_card(domain: str, records: Dict[str, Any], run_id: str = "") -> str:
     q_rec, s_rec, e_rec = records.get("qualify"), records.get("scrape"), records.get("extract")
     failed = next((r for r in records.values() if r and r.status == "error"), None)
     q = q_rec.output["qualification"] if q_rec and q_rec.status == "ok" else None
     cid = "co-" + escape(domain.replace(".", "-"))
+    goes = bool(q and q["decision"] in ("GO", "GO_FLAGGED"))
+    has_outreach = any(records.get(k) for k in ("poc", "pains", "draft", "send"))
+    is_open = goes or has_outreach or bool(failed)
 
-    head = [f'<div class="co-head"><div style="min-width:0;flex:1"><h3>{_fav(domain)}{escape(domain)}</h3>']
+    headline = escape(_headline(q)) if q else (
+        f"{escape(STEP_LABEL.get(failed.step, failed.step))} failed" if failed else "Not finished")
+    summary = (f'<summary class="co-sum"><span class="co-name">{_fav(domain)}<span>{escape(domain)}</span></span>'
+               f'<span class="co-line">{headline}</span>'
+               f'<span class="co-right">{_tag(q["decision"] if q else None)}<span class="chev" aria-hidden="true"></span></span>'
+               f'</summary>')
+
+    body = ['<div class="co-body">']
     if q:
         n = len(q.get("agent_steps", []))
-        head.append(f'<p class="headline">{escape(_headline(q))}</p><div class="co-meta">{_meter(q)}'
-                    f'<span>{q["unknown_weight_share"]:.0%} of weight unknown</span>'
-                    f'<span>{n} page{"" if n == 1 else "s"} researched</span></div>')
-    head.append(f'</div><div>{_tag(q["decision"] if q else None)}</div></div>')
-
-    status = [f'<div style="padding:0 24px">{_stepper(records)}']
+        body.append(f'<div class="co-meta">{_meter(q)}<span>{n} page{"" if n == 1 else "s"} researched</span>'
+                    f'<span>{q["unknown_weight_share"]:.0%} unknown</span></div>')
+    if goes or has_outreach:
+        body.append(_stepper(records))
     if failed:
-        status.append(f'<div class="note err"><p><b>{escape(STEP_LABEL.get(failed.step, failed.step))} failed.</b> '
-                      f'{escape(failed.error or "")}</p>{_resume(run_id, domain) if run_id else ""}</div>')
+        body.append(f'<div class="note err"><p><b>{escape(STEP_LABEL.get(failed.step, failed.step))} failed.</b> '
+                    f'{escape(_short_err(failed.error))}</p>{_resume(run_id, domain) if run_id else ""}</div>')
     elif not q and run_id and records:
-        status.append(f'<div class="note info"><p><b>Not finished.</b> Pick up where it stopped.</p>'
-                      f'{_resume(run_id, domain, "Continue")}</div>')
-    status.append("</div>")
+        body.append(f'<div class="note info"><p><b>Not finished.</b> Pick up where it stopped.</p>'
+                    f'{_resume(run_id, domain, "Continue")}</div>')
 
     tabs: List[tuple] = []
 
@@ -431,63 +486,96 @@ def domain_card(domain: str, records: Dict[str, Any], run_id: str = "") -> str:
     add("outreach", "Outreach", outreach_section(records))
     profile: Dict[str, Any] = {}
     if q:
-        flags = ""
-        if q.get("flags"):
-            flags = ('<div class="panel-h">To double-check</div><div class="checks">' + "".join(
-                f'<span class="tag t-amber plain">{icon("flag", 12)}{escape(f)}</span>' for f in q["flags"]) + "</div>")
-        rows = []
-        for sc in q["scores"]:
-            label, weight = CRITERIA.get(sc["criterion_id"], (sc["criterion_id"], ""))
-            name, tone = STATUS.get(sc["status"], (sc["status"], "gray"))
-            rows.append(f'<tr><td style="min-width:170px"><div style="font-weight:550">{escape(label)}</div>'
-                        f'<div class="mono muted" style="font-size:11px">{escape(sc["criterion_id"])}</div></td>'
-                        f'<td class="muted num small" style="white-space:nowrap">{escape(weight)}</td>'
-                        f'<td><span class="st c-{tone}">{name}</span></td>'
-                        f'<td style="min-width:260px">{escape(sc["reason"])}{_quotes(sc.get("evidence", []))}</td></tr>')
-        add("score", "Scorecard", '<div class="panel-h">Why: scorecard</div>'
-            '<div class="scroll"><table class="tbl"><thead><tr><th>Criterion</th><th>Weight</th><th>Status</th>'
-            '<th>Reason and evidence</th></tr></thead><tbody>' + "".join(rows) + "</tbody></table></div>" + flags
-            + f'<details class="fold"><summary>Decision rule</summary><p class="small muted">{escape(q_rec.note or "")}.</p>'
-              f'<p class="small">{escape(q["decision_rule"])}</p></details>')
-        loop = [f'<tr><td class="num muted">0</td><td class="muted">Start</td><td>Homepage</td>'
-                f'<td>{escape(s_rec.note or "") if s_rec else ""}</td></tr>']
-        for st in q["agent_steps"]:
-            urls = "".join(f'<div><a class="u small" href="{escape(u)}" target="_blank" rel="noopener">{escape(u[:56])}</a></div>'
-                           for u in st["urls"])
-            loop.append(f'<tr><td class="num muted">{st["round"]}</td><td style="min-width:180px">{escape(st["question"])}'
-                        f'<div class="muted small">Missing {escape(", ".join(st["missing_fields"]))}</div></td>'
-                        f'<td style="min-width:140px">{escape(st["page_kind"].capitalize())}{urls}</td>'
-                        f'<td style="min-width:220px">{escape(st["result_summary"])}</td></tr>')
-        add("research", "Research", '<div class="panel-h">Research loop</div><div class="scroll"><table class="tbl">'
-            '<thead><tr><th>#</th><th>Open question</th><th>Fetched</th><th>Result</th></tr></thead><tbody>'
-            + "".join(loop) + "</tbody></table></div>")
+        add("score", "Why", _scorecard(q, q_rec))
+        add("research", "Research", _research(q, s_rec))
         profile = q_rec.output.get("profile", {})
     elif e_rec and e_rec.status == "ok":
         profile = e_rec.output["profile"]
-    data = []
-    if profile:
-        rows = "".join(
-            f'<tr><td class="mono" style="font-size:12px">{escape(k)}</td><td>{escape(str(v["value"]))}'
-            f'{_quotes(v.get("evidence", []), 1)}</td></tr>'
-            for k, v in profile.items() if k != "domain" and isinstance(v, dict) and v.get("value") is not None)
-        data.append(f'<div class="panel-h">Extracted facts</div><div class="scroll"><table class="tbl"><tbody>{rows}'
-                    f'</tbody></table></div>')
-    links = " · ".join(f'<a class="u" href="/api/runs/{escape(r.run_id)}/domains/{escape(domain)}/steps/{s}" '
-                       f'target="_blank">{s}.json</a>' for s, r in records.items() if r)
-    if links:
-        data.append(f'<div class="panel-h">Raw trace</div><p class="small" style="margin:0">{links}</p>')
-    add("data", "Data", "".join(data))
+    add("data", "Data", _data(domain, records, profile))
 
     if tabs:
-        tab_html = ('<div class="tabs" role="tablist">' + "".join(
+        body.append('<div class="tabs" role="tablist">' + "".join(
             f'<button class="tab" role="tab" id="{cid}-t-{k}" aria-controls="{cid}-p-{k}" '
             f'aria-selected="{"true" if i == 0 else "false"}">{lbl}</button>' for i, (k, lbl, _) in enumerate(tabs))
             + "</div>" + "".join(
             f'<div class="panel" role="tabpanel" id="{cid}-p-{k}" aria-labelledby="{cid}-t-{k}"{" hidden" if i else ""}>'
             f'{h}</div>' for i, (k, _, h) in enumerate(tabs)))
-    else:
-        tab_html = '<div style="height:22px"></div>'
-    return f'<section class="card company" id="{cid}">' + "".join(head) + "".join(status) + tab_html + "</section>"
+    body.append("</div>")
+    return (f'<details class="card company" id="{cid}"{" open" if is_open else ""}>' + summary + "".join(body)
+            + "</details>")
+
+
+def _short_err(err: Optional[str]) -> str:
+    e = (err or "").replace("LLMError: ", "")
+    if "busy" in e.lower() or "quota" in e.lower() or "unreachable" in e:
+        return "The AI model was busy or out of quota. Resume to try again."
+    return e[:220]
+
+
+_NOISE = ("unknown, counted as 0", "weight is unknown", "not confirmed, assumed met")
+
+
+def _scorecard(q: Dict[str, Any], q_rec) -> str:
+    known, unknown = [], []
+    for sc in q["scores"]:
+        label, weight = CRITERIA.get(sc["criterion_id"], (sc["criterion_id"], ""))
+        if sc["status"] == "unknown":
+            unknown.append(label)
+            continue
+        name, tone = STATUS.get(sc["status"], (sc["status"], "gray"))
+        quotes = _quotes(sc.get("evidence", []))
+        n = quotes.count('class="quote"')
+        src = (f'<details class="src"><summary>{n} source{"" if n == 1 else "s"}</summary>{quotes}</details>'
+               if n else "")
+        w = "gate" if weight == "Gate" else (weight.replace("Gate · ", "gate · ") + " pts") if weight else ""
+        known.append(f'<li class="crit"><div class="crit-h"><span class="st c-{tone}">{escape(label)}</span>'
+                     f'<span class="crit-w">{escape(w)}</span><span class="crit-s c-{tone}">{name}</span></div>'
+                     f'<p>{escape(sc["reason"])}</p>{src}</li>')
+    html = f'<ul class="crits">{"".join(known)}</ul>'
+    if unknown:
+        html += (f'<div class="unknowns"><span class="label">Not found on public pages</span>'
+                 f'<div>{escape(", ".join(unknown))}</div><div class="small muted">Counted as 0 points.</div></div>')
+    notes = [f for f in q.get("flags", []) if not any(x in f for x in _NOISE)]
+    if notes:
+        html += '<ul class="notes">' + "".join(f"<li>{escape(f)}</li>" for f in notes) + "</ul>"
+    html += (f'<details class="fold"><summary>How the verdict is decided</summary><p class="small muted">'
+             f'{escape(q_rec.note or "")}.</p><p class="small">{escape(q["decision_rule"])}</p></details>')
+    return html
+
+
+def _research(q: Dict[str, Any], s_rec) -> str:
+    items = [f'<li><span class="tl-n">0</span><div><div class="tl-q">Homepage</div>'
+             f'<div class="tl-r">{escape(s_rec.note or "") if s_rec else ""}</div></div></li>']
+    for st in q["agent_steps"]:
+        links = " ".join(f'<a class="u" href="{escape(u)}" target="_blank" rel="noopener">{escape(_path(u))}</a>'
+                         for u in st["urls"])
+        items.append(f'<li><span class="tl-n">{st["round"]}</span><div><div class="tl-q">{escape(st["question"])}</div>'
+                     f'<div class="tl-r">{escape(st["page_kind"].capitalize())} {links} · {escape(st["result_summary"])}</div>'
+                     f'</div></li>')
+    return f'<ol class="timeline">{"".join(items)}</ol>'
+
+
+def _path(u: str) -> str:
+    try:
+        rest = u.split("://", 1)[1]
+        p = "/" + rest.split("/", 1)[1] if "/" in rest else "/"
+        return p if len(p) < 40 else p[:38] + "…"
+    except IndexError:
+        return u[:40]
+
+
+def _data(domain: str, records: Dict[str, Any], profile: Dict[str, Any]) -> str:
+    out = []
+    if profile:
+        rows = "".join(
+            f'<div class="kv"><span class="k mono">{escape(k)}</span><span>{escape(str(v["value"]))}</span></div>'
+            for k, v in profile.items() if k != "domain" and isinstance(v, dict) and v.get("value") is not None)
+        out.append(f'<div class="panel-h">Extracted facts</div><div class="kvs">{rows}</div>')
+    links = " · ".join(f'<a class="u" href="/api/runs/{escape(r.run_id)}/domains/{escape(domain)}/steps/{s}" '
+                       f'target="_blank">{s}</a>' for s, r in records.items() if r)
+    if links:
+        out.append(f'<div class="panel-h">Raw trace (JSON)</div><p class="small" style="margin:0">{links}</p>')
+    return "".join(out)
 
 
 def outreach_section(records: Dict[str, Any]) -> str:
@@ -545,7 +633,12 @@ def outreach_section(records: Dict[str, Any]) -> str:
 
 
 def _overview(manifest: Dict[str, Any], records_by_domain: Dict[str, Dict[str, Any]]) -> str:
-    rows = []
+    rows, any_contact, any_email = [], False, False
+    for d in manifest.get("domains", []):
+        recs = records_by_domain.get(d, {})
+        poc = recs.get("poc")
+        any_contact |= bool(poc and (poc.output or {}).get("chosen"))
+        any_email |= bool(recs.get("draft") and recs["draft"].status == "ok")
     for d in manifest.get("domains", []):
         recs = records_by_domain.get(d, {})
         q = recs.get("qualify")
@@ -554,18 +647,24 @@ def _overview(manifest: Dict[str, Any], records_by_domain: Dict[str, Dict[str, A
         c = (poc.output or {}).get("chosen") if poc else None
         send = recs.get("send")
         dash = '<span class="muted">—</span>'
-        email = ('<span class="tag t-green">Sent</span>' if send and send.status == "ok"
-                 else '<span class="tag t-gray">Draft ready</span>' if recs.get("draft") and recs["draft"].status == "ok"
-                 else dash)
-        who = (f'{escape(c["first_name"])} {escape(c.get("last_name") or "")}<div class="muted small">'
-               f'{escape(c.get("position") or "")}</div>') if c else dash
         cid = "co-" + escape(d.replace(".", "-"))
-        rows.append(f'<tr data-href="#{cid}"><td><a href="#{cid}" class="co">{_fav(d)}{escape(d)}</a></td>'
-                    f'<td>{_tag(q["decision"] if q else None)}</td><td class="hide-sm">{_meter(q) if q else dash}</td>'
-                    f'<td class="hide-sm">{who}</td><td>{email}</td></tr>')
-    return (f'<div class="section-h"><h2>Overview</h2><span class="sub">Go at {GO_THRESHOLD} / 100</span></div>'
-            f'<section class="card scroll"><table class="tbl rows"><thead><tr><th>Company</th><th>Verdict</th>'
-            f'<th class="hide-sm">Score</th><th class="hide-sm">Contact</th><th>Email</th></tr></thead><tbody>{"".join(rows)}</tbody></table></section>')
+        score = f'<b>{round(q["weighted_score"] * 100)}</b>' if q else dash
+        cells = [f'<td><a href="#{cid}" class="co">{_fav(d)}{escape(d)}</a></td>',
+                 f'<td>{_tag(q["decision"] if q else None)}</td>',
+                 f'<td class="hide-sm num">{score}</td>']
+        if any_contact:
+            who = (escape(c["first_name"] + " " + (c.get("last_name") or "")) + '<div class="muted small">'
+                   + escape(c.get("position") or "") + "</div>") if c else dash
+            cells.append(f'<td class="hide-sm">{who}</td>')
+        if any_email:
+            cells.append('<td>' + ('<span class="tag t-green">Sent</span>' if send and send.status == "ok"
+                                   else '<span class="tag t-gray">Draft</span>' if recs.get("draft") and recs["draft"].status == "ok"
+                                   else dash) + '</td>')
+        rows.append(f'<tr data-open="{cid}">{"".join(cells)}</tr>')
+    head = ('<th>Company</th><th>Verdict</th><th class="hide-sm">Score</th>'
+            + ('<th class="hide-sm">Contact</th>' if any_contact else "") + ('<th>Email</th>' if any_email else ""))
+    return (f'<section class="card scroll" style="margin-top:28px"><table class="tbl rows"><thead><tr>{head}</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></section>')
 
 
 RUN_JS = """
@@ -578,7 +677,13 @@ document.querySelectorAll('[role=tablist]').forEach(list => {
     t.addEventListener('keydown', e => { const k = {ArrowRight: 1, ArrowLeft: -1}[e.key];
       if (k) { const n = tabs[(i + k + tabs.length) % tabs.length]; n.focus(); pick(n); } }); });
 });
-document.querySelectorAll('[data-resume]').forEach(b => b.addEventListener('click', async () => {
+const openCo = id => { const el = document.getElementById(id); if (!el) return; el.open = true;
+  el.scrollIntoView({behavior: 'smooth', block: 'start'}); };
+document.querySelectorAll('tr[data-open]').forEach(tr => tr.addEventListener('click', e => {
+  e.preventDefault(); openCo(tr.dataset.open); history.replaceState(null, '', '#' + tr.dataset.open); }));
+if (location.hash) openCo(location.hash.slice(1));
+document.querySelectorAll('[data-resume]').forEach(b => b.addEventListener('click', async e => {
+  e.preventDefault();
   document.querySelectorAll('[data-resume]').forEach(x => x.disabled = true);
   const label = b.querySelector('span');
   await advanceDomain(b.dataset.run, b.dataset.resume, 'send', msg => { label.textContent = msg.slice(0, 60); });
@@ -587,21 +692,31 @@ document.querySelectorAll('[data-resume]').forEach(b => b.addEventListener('clic
 </script>"""
 
 
+def _distribution(counts: Dict[str, int]) -> str:
+    total = sum(counts.values()) or 1
+    tone = {**VERDICT_TONE, "Incomplete": "gray"}
+    segs = "".join(f'<i class="bg-{tone[k]}" style="flex:{n}" title="{n} {VERDICT_LABEL.get(k, k)}"></i>'
+                   for k, n in counts.items() if n)
+    legend = "".join(f'<span class="lg"><span class="dot bg-{tone[k]}"></span><b class="num">{n}</b> '
+                     f'{VERDICT_LABEL.get(k, k)}</span>' for k, n in counts.items() if n)
+    return f'<div class="dist" aria-label="Verdicts">{segs}</div><div class="legend">{legend}</div>' if total else ""
+
+
 def run_page(manifest: Dict[str, Any], records_by_domain: Dict[str, Dict[str, Any]]) -> str:
     counts = {k: 0 for k in (*VERDICTS, "Incomplete")}
     for recs in records_by_domain.values():
         q = recs.get("qualify")
         counts[q.output["qualification"]["decision"] if q and q.status == "ok" else "Incomplete"] += 1
-    stats = "".join(f'<div class="stat"><b class="num">{n}</b>{_tag(k)}</div>' for k, n in counts.items())
     s = manifest.get("settings", {})
     run_id = manifest["run_id"]
     n = len(manifest.get("domains", []))
     body = (f'<a class="crumb" href="/">{icon("back", 14)}All runs</a>'
             f'<h1>{n} compan{"y" if n == 1 else "ies"}</h1>'
             f'<div class="meta"><span>{escape(_when(manifest.get("created_at")))}</span>'
-            f'<span>{escape(str(s.get("provider", "anthropic")).capitalize())} · {escape(str(s.get("model")))}</span>'
-            f'<span>Prompt {escape(str(s.get("prompt_version")))}</span><span class="mono">{escape(run_id)}</span></div>'
-            f'<section class="card stats">{stats}</section>' + _overview(manifest, records_by_domain)
-            + '<div class="section-h"><h2>Companies</h2><span class="sub">Verdict, reasons, contact and email</span></div>')
+            f'<span>{escape(str(s.get("model")))}</span></div>'
+            + _distribution(counts) + _overview(manifest, records_by_domain)
+            + '<div class="section-h"><h2>Companies</h2><span class="sub">Open one for the reasons, contact and email</span></div>')
     body += "".join(domain_card(d, records_by_domain.get(d, {}), run_id) for d in manifest.get("domains", []))
-    return page(f"Run · {_when(manifest.get('created_at'), short=True)}", body + ADVANCE_JS + RUN_JS + ROW_JS)
+    body += (f'<p class="foot small muted">Run <span class="mono">{escape(run_id)}</span> · prompt '
+             f'{escape(str(s.get("prompt_version")))} · {escape(str(s.get("provider", "")))}</p>')
+    return page(f"Run · {_when(manifest.get('created_at'), short=True)}", body + ADVANCE_JS + RUN_JS)

@@ -167,7 +167,7 @@ def test_web_creates_run_and_renders_trace(client, tmp_path):
                                 output={"qualification": out["qualification"].model_dump(mode="json"),
                                         "profile": out["profile"].model_dump(mode="json")}))
     page = client.get(f"/runs/{run_id}")
-    assert page.status_code == 200 and "GO" in page.text and "Research loop" in page.text
+    assert page.status_code == 200 and "GO" in page.text and "Research" in page.text and "timeline" in page.text
     assert client.get(f"/api/runs/{run_id}/domains/acme.io/steps/qualify").status_code == 200
 
 
