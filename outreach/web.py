@@ -754,7 +754,7 @@ def _short_err(err: Optional[str]) -> str:
     return e[:220]
 
 
-_NOISE = ("unknown, counted as 0", "weight is unknown", "not confirmed, assumed met")
+_NOISE = ("unknown, counted as 0", "left out of the score", "weight is unknown", "not confirmed, assumed met")
 
 
 def _scorecard(q: Dict[str, Any], q_rec) -> str:
@@ -776,7 +776,7 @@ def _scorecard(q: Dict[str, Any], q_rec) -> str:
     html = f'<ul class="crits">{"".join(known)}</ul>'
     if unknown:
         html += (f'<div class="unknowns"><span class="label">Not found on public pages</span>'
-                 f'<div>{escape(", ".join(unknown))}</div><div class="small muted">Most count as 0 points; the certification gap is assumed and flagged.</div></div>')
+                 f'<div>{escape(", ".join(unknown))}</div><div class="small muted">Scored only on what could be checked; these are flagged for a human, and an unknown certification gap is assumed.</div></div>')
     notes = [f for f in q.get("flags", []) if not any(x in f for x in _NOISE)]
     if notes:
         html += '<ul class="notes">' + "".join(f"<li>{escape(f)}</li>" for f in notes) + "</ul>"

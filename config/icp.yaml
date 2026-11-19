@@ -56,7 +56,10 @@ evidence_map:
 
 decision:
   go_threshold: 0.55          # rec: weighted score needed for GO
-  max_unknown_share: 0.45     # rec: above this share of unknown weight -> MANUAL_REVIEW (hand to a human)
+  max_unknown_share: 0.45     # rec: used only when score_on is "all"
+  score_on: known             # rec (owner's choice, Nov 2026): score over what public pages could confirm, flag the rest.
+                              # Small SaaS rarely publish funding/headcount, so "all" sent most of them to review.
+  min_known_share: 0.3        # rec: under 30% of the weight confirmed -> MANUAL_REVIEW
   points: {met: 1.0, partial: 0.5, not_met: 0.0}
 
 # if_unknown (after the loop has run out of fetches):

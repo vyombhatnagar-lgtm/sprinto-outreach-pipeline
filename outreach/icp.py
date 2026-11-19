@@ -51,6 +51,8 @@ class Scorecard:
     go_threshold: float
     max_unknown_share: float
     points: Dict[str, float]
+    score_on: str = "all"          # "all": unknowns count 0 out of the full weight; "known": score over checked weight
+    min_known_share: float = 0.3   # score_on=known: below this share of checked weight -> MANUAL_REVIEW
 
     @property
     def ids(self) -> List[str]:
@@ -97,6 +99,7 @@ def load_scorecard(path: Path) -> Scorecard:
         criteria=criteria, questions=questions, max_fetches=int(em["max_fetches_beyond_home"]),
         go_threshold=float(d["go_threshold"]), max_unknown_share=float(d["max_unknown_share"]),
         points={k: float(v) for k, v in d["points"].items()},
+        score_on=str(d.get("score_on", "all")), min_known_share=float(d.get("min_known_share", 0.3)),
     )
 
 
@@ -117,8 +120,10 @@ def rule_text(card: Scorecard) -> str:
         f"Gates {gates}: not_met -> NO_GO. "
         f"Unknown criteria follow their if_unknown policy (manual_review -> MANUAL_REVIEW; "
         f"assume_met_flag -> counted met and flagged; zero_flag -> counted 0 and flagged). "
-        f"Unknown weight share > {card.max_unknown_share} -> MANUAL_REVIEW. "
-        f"Otherwise weighted score >= {card.go_threshold} -> GO (GO_FLAGGED if anything is flagged), else NO_GO."
+        + (f"Score is computed over the weight that could be checked (zero_flag unknowns are left out, not counted 0); "
+           f"checked weight < {card.min_known_share} of the total -> MANUAL_REVIEW. "
+           if card.score_on == "known" else f"Unknown weight share > {card.max_unknown_share} -> MANUAL_REVIEW. ")
+        + f"Otherwise score >= {card.go_threshold} -> GO (GO_FLAGGED if anything is flagged), else NO_GO."
     )
 
 
@@ -135,7 +140,7 @@ def decide(card: Scorecard, scores: List[CriterionScore], short_circuit: Optiona
     total_weight = sum(c.weight for c in card.criteria) or 1.0
     unknown_share = round(sum(c.weight for c in card.criteria if c.id in unknown) / total_weight, 3)
 
-    earned = 0.0
+    earned, unchecked = 0.0, 0.0
     for c in card.criteria:
         status = by_id[c.id].status
         if status == "unknown":
@@ -143,10 +148,15 @@ def decide(card: Scorecard, scores: List[CriterionScore], short_circuit: Optiona
                 earned += c.weight * card.points["met"]
                 flags.append(f"{c.id}: not confirmed, assumed met")
             elif c.if_unknown == "zero_flag":
-                flags.append(f"{c.id}: unknown, counted as 0")
+                unchecked += c.weight
+                flags.append(f"{c.id}: unknown, " + ("left out of the score" if card.score_on == "known" else "counted as 0"))
         else:
             earned += c.weight * card.points.get(status, 0.0)
-    score = round(earned / total_weight, 3)
+    known_weight = total_weight - unchecked
+    if card.score_on == "known":
+        score = round(earned / known_weight, 3) if known_weight > 0 else 0.0
+    else:
+        score = round(earned / total_weight, 3)
 
     def out(verdict: str) -> Decision:
         return Decision(verdict, score, unknown_share, rule, flags, unknown)
@@ -159,7 +169,11 @@ def decide(card: Scorecard, scores: List[CriterionScore], short_circuit: Optiona
     if any(by_id[c.id].status == "unknown" and c.if_unknown == "manual_review" for c in card.criteria):
         flags.append("a gate criterion could not be answered from public pages")
         return out("MANUAL_REVIEW")
-    if unknown_share > card.max_unknown_share:
+    if card.score_on == "known":
+        if known_weight / total_weight < card.min_known_share:
+            flags.append(f"only {known_weight / total_weight:.0%} of the scorecard could be checked")
+            return out("MANUAL_REVIEW")
+    elif unknown_share > card.max_unknown_share:
         flags.append(f"{unknown_share:.0%} of the scorecard weight is unknown")
         return out("MANUAL_REVIEW")
     if score >= card.go_threshold:

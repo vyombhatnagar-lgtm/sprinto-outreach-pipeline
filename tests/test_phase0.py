@@ -1,3 +1,4 @@
+import dataclasses
 import pytest
 
 from outreach.config import HARDCODED_RECIPIENT, load_settings
@@ -56,13 +57,37 @@ def test_unknown_certification_is_assumed_gap_and_flagged():
     assert any("certification_gap" in f for f in d.flags)
 
 
-def test_unknown_stage_ranks_lower_and_flags():
-    d = decide(CARD, scores(funding_stage="unknown"))
+ALL = dataclasses.replace(CARD, score_on="all")  # the stricter mode: unknowns count 0 out of the full weight
+
+
+def test_strict_mode_unknown_stage_ranks_lower_and_flags():
+    d = decide(ALL, scores(funding_stage="unknown"))
     assert d.decision == "GO_FLAGGED" and d.weighted_score == 0.8
 
 
-def test_too_many_unknowns_hands_off():
+def test_strict_mode_too_many_unknowns_hands_off():
     s = scores(funding_stage="unknown", compliance_hiring="unknown", enterprise_pressure="unknown")  # 55%
+    assert decide(ALL, s).decision == "MANUAL_REVIEW"
+
+
+def test_config_scores_on_checked_evidence():
+    assert CARD.score_on == "known"
+    d = decide(CARD, scores(funding_stage="unknown"))
+    assert d.decision == "GO_FLAGGED" and d.weighted_score == 1.0  # 80 earned of 80 checked
+    assert any("left out of the score" in f for f in d.flags)
+
+
+def test_mostly_unknown_but_positive_evidence_is_go_flagged():
+    # the twenty.com case: SaaS + enterprise met, certification assumed, news not met, rest unknown
+    s = scores(certification_gap="unknown", funding_stage="unknown", employee_count="unknown",
+               compliance_hiring="unknown", security_news="not_met")
+    d = decide(CARD, s)
+    assert d.decision == "GO_FLAGGED" and d.weighted_score == 0.8
+
+
+def test_too_little_checked_hands_off():
+    s = scores(funding_stage="unknown", employee_count="unknown", compliance_hiring="unknown",
+               enterprise_pressure="unknown", security_news="unknown")  # only the assumed 25% left
     assert decide(CARD, s).decision == "MANUAL_REVIEW"
 
 

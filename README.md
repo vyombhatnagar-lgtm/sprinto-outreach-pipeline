@@ -27,7 +27,7 @@ The recipient is **hardcoded** to `vyom_bhatnagar@pg27.mesaschool.co`, as the ca
    | Hiring for security / compliance? | compliance_job_postings, employee_count | /careers (+ job board API) | 1 | rank lower, flag | - |
    | Right stage (Series A-C)? | funding_stage | Google News, /about, /customers | 1 | rank lower, flag | - |
 
-   **Code** checks whether fields are filled; the model is never asked "do you know enough". At most 4 fetches beyond the homepage. Then the qualifying model (`OUTREACH_MODEL`, Opus) gives each criterion a status backed by profile fields (a "met" with no evidence is downgraded to unknown), and `outreach/icp.py::decide` computes **GO / GO_FLAGGED / NO_GO / MANUAL_REVIEW**.
+   **Code** checks whether fields are filled; the model is never asked "do you know enough". At most 4 fetches beyond the homepage. Then the qualifying model (`OUTREACH_MODEL`, Opus) gives each criterion a status backed by profile fields (a "met" with no evidence is downgraded to unknown), and `outreach/icp.py::decide` computes **GO / GO_FLAGGED / NO_GO / MANUAL_REVIEW**. The score is taken over the weight public pages could confirm (`score_on: known` in `config/icp.yaml`); what could not be checked is left out and flagged, so the verdict becomes GO_FLAGGED. Under 30% confirmed goes to MANUAL_REVIEW. Set `score_on: all` for the stricter rule (unknowns count 0).
 
 ## Setup
 ```bash
