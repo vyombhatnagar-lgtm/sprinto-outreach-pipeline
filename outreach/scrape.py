@@ -127,6 +127,42 @@ def word_count(text: str) -> int:
     return len(text.split())
 
 
+class BlockedHost(Exception):
+    pass
+
+
+def fetch_error(e: Exception) -> str:
+    """Plain words for the trace and the dashboard; no raw socket errors."""
+    msg = str(e)
+    if isinstance(e, BlockedHost) or "non-public address" in msg:
+        return "not fetched: " + msg
+    if "does not resolve" in msg:
+        return msg
+    if isinstance(e, httpx.TimeoutException):
+        return "the site did not respond in time"
+    if isinstance(e, httpx.TooManyRedirects):
+        return "too many redirects"
+    if isinstance(e, httpx.ConnectError):
+        return "could not connect to the site"
+    return f"{type(e).__name__}: {msg[:160]}"
+
+
+def check_public_host(host: str) -> None:
+    """SSRF guard: every request (and every redirect hop) must resolve only to public addresses."""
+    import ipaddress
+    import socket
+    if not host:
+        raise BlockedHost("no host")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        raise httpx.ConnectError(f"{host} does not resolve (no DNS record)")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        if not ip.is_global or ip.is_multicast:
+            raise BlockedHost(f"{host} resolves to a non-public address; not fetched")
+
+
 def _same_site(url: str, domain: str) -> bool:
     host = (urlparse(url).hostname or "").lower()
     return host == domain or host.endswith("." + domain)
@@ -212,7 +248,8 @@ class Scraper:
     def _http_get(self, url: str) -> httpx.Response:
         if self._client is None:
             self._client = httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT,
-                                        follow_redirects=True)
+                                        follow_redirects=True, max_redirects=5,
+                                        event_hooks={"request": [lambda req: check_public_host(req.url.host)]})
         return self._client.get(url)
 
     def _get(self, url: str) -> httpx.Response:
@@ -246,7 +283,7 @@ class Scraper:
         try:
             r = self._get(url)
         except Exception as e:
-            return RawPage(url=url, page_kind=kind, error=f"{type(e).__name__}: {e}"), ""
+            return RawPage(url=url, page_kind=kind, error=fetch_error(e)), ""
         html = r.text if r.status_code == 200 else ""
         final_url = str(r.url) if getattr(r, "url", None) else url
         text = html_to_text(html) if html else ""
@@ -283,7 +320,9 @@ class Scraper:
                 break  # blocked: respect it, don't hammer other variants
         result.pages.append(home)
         if home_html:
-            result.links = find_links(home_html, home.url, domain)
+            final = (urlparse(home.url).hostname or domain).lower()
+            final = final[4:] if final.startswith("www.") else final
+            result.links = find_links(home_html, home.url, final)  # a redirect (notion.so -> notion.com) moves the site
             ats = find_ats(home_html)
             result.ats = list(ats) if ats else None
         return result

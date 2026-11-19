@@ -371,3 +371,62 @@ def test_unextracted_certification_is_caught():
     pages = [RawPage(url="https://x.com/security", page_kind="security", text="Intro\nWe hold ISO 27001 today.")]
     assert "x.com/security" in unextracted_certifications(prof, pages)
     assert unextracted_certifications(prof, [RawPage(url="https://x.com", page_kind="home", text="hello")]) is None
+
+
+def test_evidence_is_not_repeated_across_fields():
+    from outreach.models import CompanyProfile, Evidence
+    from outreach.research import _evidence_for
+    e = Evidence(source_url="https://x.com", quote="Streamlined PDF workflows for business teams", source_type="website")
+    prof = CompanyProfile(domain="x.com")
+    prof.is_saas.value, prof.is_saas.evidence = True, [e]
+    prof.target_customers.value, prof.target_customers.evidence = "business teams", [e]
+    assert len(_evidence_for(prof, ["is_saas", "target_customers", "is_saas"])) == 1
+
+
+# ---- stress-test regressions (Nov 2026) ----
+
+def test_internal_names_are_rejected():
+    from outreach.domains import normalize_domain
+    for bad in ("metadata.google.internal", "printer.local", "app.localhost", "x.test"):
+        with pytest.raises(ValueError):
+            normalize_domain(bad)
+    assert normalize_domain("HTTPS://www.Notion.so/x") == "notion.so"
+
+
+def test_scraper_refuses_private_addresses():
+    from outreach.scrape import BlockedHost, check_public_host
+    for host in ("localhost", "127.0.0.1", "169.254.169.254", "10.0.0.1"):
+        with pytest.raises(BlockedHost):
+            check_public_host(host)
+
+
+def test_bad_paths_are_404_not_500(client):
+    r = client.post("/api/runs", json={"domains": ["acme.io"], "until": "qualify"})
+    rid = r.json()["run_id"]
+    assert client.post(f"/api/runs/{rid}/domains/localhost/advance?until=scrape").status_code == 404
+    assert client.post("/api/runs/nope/domains/localhost/advance?until=scrape").status_code == 404
+    assert client.post(f"/api/runs/{'x' * 500}/domains/acme.io/advance").status_code == 404
+    assert client.post("/api/runs", json={"domains": [None]}).status_code == 400
+
+
+def test_resume_keeps_the_runs_own_until(client, tmp_path):
+    r = client.post("/api/runs", json={"domains": ["acme.io"], "until": "qualify"})
+    rid = r.json()["run_id"]
+    TraceStore(tmp_path, rid).write_step(StepRecord(run_id=rid, domain="acme.io", step="extract", status="error",
+                                                    started_at=utcnow(), error="LLMError: Gemini is busy"))
+    page = client.get(f"/runs/{rid}").text
+    assert 'data-until="qualify"' in page and "overloaded" in page
+
+
+def test_short_circuit_scores_without_a_model_call():
+    from outreach.research import Researcher
+    sc = scraper()
+    prof, _ = Extractor(FakeLLM(page_aware_extraction)).extract(sc.scrape("acme.io"))
+    prof.is_saas.value = False
+
+    class NoCall:
+        def structured(self, **kw):
+            raise AssertionError("model must not be called after a stop condition")
+    out = Researcher(CARD, sc, Extractor(FakeLLM(page_aware_extraction)), NoCall()).research(sc.scrape("acme.io"), prof)
+    q = out["qualification"]
+    assert q.decision == "NO_GO" and next(s for s in q.scores if s.criterion_id == "is_saas").status == "not_met"

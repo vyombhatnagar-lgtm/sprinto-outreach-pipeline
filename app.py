@@ -73,8 +73,12 @@ class NewRun(BaseModel):
 def create_run(body: NewRun):
     if body.until not in IMPLEMENTED_STEPS:
         raise HTTPException(400, f"until must be one of {IMPLEMENTED_STEPS}")
+    if len(body.domains) > 4 * MAX_DOMAINS:
+        raise HTTPException(400, f"Give 1-{MAX_DOMAINS} domains")
+    if not all(isinstance(d, str) for d in body.domains):
+        raise HTTPException(400, "domains must be a list of strings")
     try:
-        domains = normalize_domains([str(d) for d in body.domains])
+        domains = normalize_domains(body.domains)
     except ValueError as e:
         raise HTTPException(400, str(e))
     if not domains or len(domains) > MAX_DOMAINS:
@@ -88,12 +92,17 @@ def create_run(body: NewRun):
 
 
 @app.post("/api/runs/{run_id}/domains/{domain}/advance")
-def advance_domain(run_id: str, domain: str, until: str = "send"):
+def advance_domain(run_id: str, domain: str, until: str = "send", retry_failed: bool = False):
     """Do one unit of work for one domain (scrape, extract, one loop fetch, or final scoring)."""
     s = load_settings()
+    if len(run_id) > 64:
+        raise HTTPException(404, "Unknown run or domain")
+    try:
+        domain = normalize_domain(domain)
+    except ValueError:
+        raise HTTPException(404, "Unknown run or domain")
     store = open_store(s, run_id)
     manifest = store.read_manifest()
-    domain = normalize_domain(domain)
     if not manifest or domain not in manifest["domains"]:
         raise HTTPException(404, "Unknown run or domain")
     if until not in IMPLEMENTED_STEPS:
@@ -102,7 +111,7 @@ def advance_domain(run_id: str, domain: str, until: str = "send"):
         pipe = build_pipeline(s, store, until=until)
     except Exception as e:
         raise HTTPException(503, f"Cannot create the LLM client: {e}")
-    return {"domain": domain, **pipe.advance(domain, until)}
+    return {"domain": domain, **pipe.advance(domain, until, retry_failed=retry_failed)}
 
 
 @app.get("/runs/{run_id}", response_class=HTMLResponse)
@@ -117,8 +126,12 @@ def run_view(run_id: str):
 
 @app.get("/api/runs/{run_id}/domains/{domain}/steps/{step}")
 def step_json(run_id: str, domain: str, step: str):
-    if step not in STEP_ORDER:
+    if step not in STEP_ORDER or len(run_id) > 64:
         raise HTTPException(404, "Unknown step")
+    try:
+        domain = normalize_domain(domain)
+    except ValueError:
+        raise HTTPException(404, "No record")
     rec = open_store(load_settings(), run_id).read_step(domain, step)
     if not rec:
         raise HTTPException(404, "No record")

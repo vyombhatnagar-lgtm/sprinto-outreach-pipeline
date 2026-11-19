@@ -55,12 +55,23 @@ class Pipeline:
         out["retries"] = retries
         self._record(domain, step, "error", started, prompt_version=PROMPT_VERSION, output=out,
                      error=f"{type(e).__name__}: {e}" + (" (will retry)" if retry else ""), **kw)
-        return {"stage": step, "done": not retry, "retry": retry, "message": str(e)}
+        msg = str(e).replace("; the step can be retried", "")
+        if not retry:
+            msg += f" (gave up after {retries} tries; use Resume to try again later)"
+        return {"stage": step, "done": not retry, "retry": retry, "message": msg}
 
     # ------------------------------------------------------------------ one unit of work
 
-    def advance(self, domain: str, until: str = "send") -> Dict[str, Any]:
+    def advance(self, domain: str, until: str = "send", retry_failed: bool = False) -> Dict[str, Any]:
+        """retry_failed: a person pressed Resume, so a step that ran out of automatic retries
+        (provider outage) gets a fresh set. Scrape failures are not retried: they are the site's answer."""
         stop_at = STEP_ORDER.index(until)
+        if retry_failed:
+            for step in STEP_ORDER[1:]:
+                rec = self.store.read_step(domain, step)
+                if rec is not None and rec.status == "error" and self._retry_info(rec) >= MAX_UNIT_RETRIES:
+                    rec.output = {**(rec.output or {}), "retries": 0}
+                    self.store.write_step(rec)
         scrape_rec = self.store.read_step(domain, "scrape")
 
         # Step 1 - scrape (homepage only; the loop fetches more on demand)
@@ -72,7 +83,7 @@ class Pipeline:
                 reason = (home.error if home else None) or "empty page"
                 self._record(domain, "scrape", "error", started, inputs={"domain": domain},
                              output=scrape.model_dump(mode="json"),
-                             error=f"homepage unreadable ({reason}); skipped, not retried around a block")
+                             error=f"homepage unreadable ({reason})")
                 return {"stage": "scrape", "done": True, "message": f"homepage unreadable ({reason})"}
             self._record(domain, "scrape", "ok", started, inputs={"domain": domain},
                          output=scrape.model_dump(mode="json"),
@@ -138,7 +149,7 @@ class Pipeline:
             return self._llm_failure(domain, "qualify", started, e, q_rec, inputs=inputs,
                                      output={"state": st.model_dump(mode="json")})
         q = res["qualification"]
-        self._record(domain, "qualify", "ok", started, model=res["llm_calls"][-1]["model"],
+        self._record(domain, "qualify", "ok", started, model=(res["llm_calls"][-1]["model"] if res["llm_calls"] else None),
                      prompt_version=PROMPT_VERSION, inputs=inputs,
                      output={"qualification": q.model_dump(mode="json"),
                              "profile": res["profile"].model_dump(mode="json"),

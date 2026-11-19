@@ -130,7 +130,7 @@ def _evidence_for(profile: CompanyProfile, fields: List[str]) -> List[Evidence]:
     for f in fields:
         fact = getattr(profile, f, None)
         if fact is not None and fact.value is not None:
-            ev.extend(fact.evidence)
+            ev.extend(e for e in fact.evidence if (e.source_url, e.quote) not in {(x.source_url, x.quote) for x in ev})
     return ev
 
 
@@ -235,11 +235,24 @@ class Researcher:
                 extra_flags.append(f"'{q.question}' unanswered after {n} fetch(es): needs a human")
 
         pages_read = [p.url for p in st.pages if p.text]
-        raw, meta = self.llm.structured(system=QUALIFY_SYSTEM,
-                                        user=build_qualify_prompt(self.card, profile, pages_read),
-                                        output_model=_Scores, effort="medium")
-        llm_calls = st.llm_calls + [meta]
-        scores, downgraded = check_scores(self.card, raw, profile)
+        if st.stop:  # the verdict is already NO_GO by rule; asking the model to score would only cost time
+            decisive = {"is_saas": ("not SaaS", profile.is_saas.evidence),
+                        "certification_gap": ("already holds", profile.certifications_claimed.evidence)}
+            scores = []
+            for c in self.card.criteria:
+                key, ev = decisive.get(c.id, (None, []))
+                if key and st.stop.startswith(key):
+                    scores.append(CriterionScore(criterion_id=c.id, status="not_met", reason=st.stop, evidence=ev[:3]))
+                else:
+                    scores.append(CriterionScore(criterion_id=c.id, status="unknown",
+                                                 reason="not scored: the assessment stopped early"))
+            llm_calls, downgraded = list(st.llm_calls), []
+        else:
+            raw, meta = self.llm.structured(system=QUALIFY_SYSTEM,
+                                            user=build_qualify_prompt(self.card, profile, pages_read),
+                                            output_model=_Scores, effort="medium")
+            llm_calls = st.llm_calls + [meta]
+            scores, downgraded = check_scores(self.card, raw, profile)
         d = decide(self.card, scores, short_circuit=st.stop, extra_flags=extra_flags,
                    hold=unextracted_certifications(profile, st.pages))
         qual = Qualification(

@@ -4,11 +4,13 @@ from pathlib import Path
 from typing import Iterable, List
 from urllib.parse import urlparse
 
+_RESERVED_SUFFIXES = (".internal", ".local", ".localhost", ".localdomain", ".lan", ".home", ".corp",
+                      ".intranet", ".test", ".invalid", ".example", ".arpa", ".onion")
 _DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 
 
 def normalize_domain(raw: str) -> str:
-    s = raw.strip().lower()
+    s = str(raw).strip().lower()[:300]
     if not s:
         raise ValueError("empty domain")
     if "://" not in s:
@@ -17,7 +19,9 @@ def normalize_domain(raw: str) -> str:
     if host.startswith("www."):
         host = host[4:]
     if not _DOMAIN_RE.match(host):
-        raise ValueError(f"not a valid domain: {raw!r}")
+        raise ValueError(f"not a valid domain: {str(raw)[:80]!r}")
+    if host.endswith(_RESERVED_SUFFIXES):
+        raise ValueError(f"not a public domain: {host[:80]!r}")
     return host
 
 

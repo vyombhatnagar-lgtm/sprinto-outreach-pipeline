@@ -65,7 +65,7 @@ def _evidence(profile: CompanyProfile, fields: List[str]) -> List[Evidence]:
     for f in fields:
         fact = getattr(profile, f, None) if f in CompanyProfile.model_fields and f != "domain" else None
         if fact is not None and fact.value is not None:
-            ev.extend(fact.evidence)
+            ev.extend(e for e in fact.evidence if (e.source_url, e.quote) not in {(x.source_url, x.quote) for x in ev})
     return ev
 
 

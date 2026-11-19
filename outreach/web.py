@@ -558,12 +558,12 @@ def home(runs: List[Dict[str, Any]], can_run: bool, steps: List[str], stats: Opt
 ADVANCE_JS = """
 <script>
 const STAGE_IX = {scrape: 0, extract: 1, research: 2, qualify: 2, poc: 3, pains: 4, draft: 5, send: 6};
-async function advanceDomain(runId, d, until, report) {
+async function advanceDomain(runId, d, until, report, extra = '') {
   let last = null;
   for (let unit = 0, busy = 0; unit < 30; unit++) {
     let r;
     try {
-      const res = await fetch(`/api/runs/${runId}/domains/${encodeURIComponent(d)}/advance?until=${until}`, {method: 'POST'});
+      const res = await fetch(`/api/runs/${runId}/domains/${encodeURIComponent(d)}/advance?until=${encodeURIComponent(until)}${extra}`, {method: 'POST'});
       r = await res.json();
       if (!res.ok) { report(`Error: ${r.detail || res.status}`, null, r); return r; }
     } catch (e) { report('Network error, retrying…'); await new Promise(z => setTimeout(z, 5000)); continue; }
@@ -682,13 +682,13 @@ def _headline(q: Dict[str, Any]) -> str:
     return "Does not qualify: " + (", ".join(miss[:3]) if miss else "score is below the threshold") + "."
 
 
-def _resume(run_id: str, domain: str, label: str = "Resume") -> str:
-    return (f'<button class="btn quiet" data-resume="{escape(domain)}" data-run="{escape(run_id)}">'
+def _resume(run_id: str, domain: str, label: str = "Resume", until: str = "send") -> str:
+    return (f'<button class="btn quiet" data-resume="{escape(domain)}" data-run="{escape(run_id)}" data-until="{escape(until)}">'
             f'{icon("refresh", 14)}<span>{label}</span></button>')
 
 
 
-def domain_card(domain: str, records: Dict[str, Any], run_id: str = "") -> str:
+def domain_card(domain: str, records: Dict[str, Any], run_id: str = "", until: str = "send") -> str:
     q_rec, s_rec, e_rec = records.get("qualify"), records.get("scrape"), records.get("extract")
     failed = next((r for r in records.values() if r and r.status == "error"), None)
     q = q_rec.output["qualification"] if q_rec and q_rec.status == "ok" else None
@@ -713,10 +713,11 @@ def domain_card(domain: str, records: Dict[str, Any], run_id: str = "") -> str:
         body.append(_stepper(records))
     if failed:
         body.append(f'<div class="note err"><p><b>{escape(STEP_LABEL.get(failed.step, failed.step))} failed.</b> '
-                    f'{escape(_short_err(failed.error))}</p>{_resume(run_id, domain) if run_id else ""}</div>')
+                    f'{escape(_short_err(failed.error))}</p>'
+                    f'{_resume(run_id, domain, until=until) if run_id and failed.step != "scrape" else ""}</div>')
     elif not q and run_id and records:
         body.append(f'<div class="note info"><p><b>Not finished.</b> Pick up where it stopped.</p>'
-                    f'{_resume(run_id, domain, "Continue")}</div>')
+                    f'{_resume(run_id, domain, "Continue", until)}</div>')
 
     tabs: List[tuple] = []
 
@@ -749,8 +750,11 @@ def domain_card(domain: str, records: Dict[str, Any], run_id: str = "") -> str:
 
 def _short_err(err: Optional[str]) -> str:
     e = (err or "").replace("LLMError: ", "")
-    if "busy" in e.lower() or "quota" in e.lower() or "unreachable" in e:
-        return "The AI model was busy or out of quota. Resume to try again."
+    low = e.lower()
+    if e.startswith("homepage unreadable"):
+        return "Could not read the website: " + e[len("homepage unreadable"):].strip(" ()") + "."
+    if any(k in low for k in ("gemini is busy", "quota", "unreachable", "http 503", "timed out after")):
+        return "The AI model was overloaded or out of quota. Resume to try again."
     return e[:220]
 
 
@@ -938,7 +942,8 @@ document.querySelectorAll('[data-resume]').forEach(b => b.addEventListener('clic
   e.preventDefault(); SFX.start();
   document.querySelectorAll('[data-resume]').forEach(x => x.disabled = true);
   const label = b.querySelector('span');
-  await advanceDomain(b.dataset.run, b.dataset.resume, 'send', (msg, stage) => { label.textContent = msg.slice(0, 60); if (stage) SFX.step(); });
+  await advanceDomain(b.dataset.run, b.dataset.resume, b.dataset.until || 'qualify',
+    (msg, stage) => { label.textContent = msg.slice(0, 60); if (stage) SFX.step(); }, '&retry_failed=true');
   location.reload();
 }));
 if ([...document.querySelectorAll('details.company')].some(d => (d.dataset.verdict || '').startsWith('GO')))
@@ -980,7 +985,7 @@ def run_page(manifest: Dict[str, Any], records_by_domain: Dict[str, Dict[str, An
             + _kpi("Emails drafted", drafts, "send", "amber", f"{contacts} contact{'' if contacts == 1 else 's'} found") + "</div>")
     body = hero + kpis + _overview(manifest, records_by_domain)
     body += '<div class="section-h"><h2>Companies</h2><span class="sub">Open one for the reasons, contact and email</span></div>'
-    body += "".join(domain_card(d, records_by_domain.get(d, {}), run_id) for d in manifest.get("domains", []))
+    body += "".join(domain_card(d, records_by_domain.get(d, {}), run_id, s.get("until") or "send") for d in manifest.get("domains", []))
     body += (f'<p class="foot small muted">Run <span class="mono">{escape(run_id)}</span> · prompt '
              f'{escape(str(s.get("prompt_version")))} · {escape(str(s.get("provider", "")))}</p>')
     return page(f"Run · {_when(manifest.get('created_at'), short=True)}", body + ADVANCE_JS + RUN_JS)
