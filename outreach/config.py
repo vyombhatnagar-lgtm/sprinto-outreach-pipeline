@@ -84,9 +84,9 @@ def load_settings() -> Settings:
         # LLM_PROVIDER=gemini|anthropic; unset -> gemini when a Gemini key is present
         provider=_provider(),
         gemini_api_key=os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", ""),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
-        gemini_extract_model=os.getenv("GEMINI_EXTRACT_MODEL", "") or os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
-        gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.7-flash,gemini-3.5-flash,gemini-2.5-flash"),  # tried in order on retries when a model is busy or out of quota
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+        gemini_extract_model=os.getenv("GEMINI_EXTRACT_MODEL", "") or os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+        gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash-lite,gemini-3.8-flash,gemini-3.5-flash"),  # tried in order on retries when a model is busy or out of quota
         hunter_api_key=os.getenv("HUNTER_API_KEY", ""),
         agent_max_rounds=int(os.getenv("AGENT_MAX_ROUNDS", "4")),
         review_before_send=_bool(os.getenv("REVIEW_BEFORE_SEND", "false")),

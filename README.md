@@ -16,7 +16,7 @@ The recipient is **hardcoded** to `vyom_bhatnagar@pg27.mesaschool.co`, as the ca
 
 ## How steps 1-3 work (follows MESA L4, "Data Acquisition & Agent Loops")
 1. **Scrape** - a single-fetch scraper: the homepage only. Request-based first; if the cleaned text is under 200 words (usually a JavaScript-rendered page) it is re-read through Jina Reader. Cleaning drops nav/footers, lines under 8 words unless they carry a buying signal ("SOC 2 Type II"), and duplicates, and caps each page at ~1,500 tokens. robots.txt is respected and requests are spaced out. A blocked site (403/429) is logged and skipped, never worked around.
-**Models:** Gemini (`GEMINI_MODEL`, default `gemini-3.8-flash`) when `GEMINI_API_KEY` is set, otherwise Anthropic (Haiku for extraction, Opus for qualifying). Set `LLM_PROVIDER` to force one.
+**Models:** Gemini (`GEMINI_MODEL`, default `gemini-3.5-flash-lite`, falling back to 2.5-flash-lite, 3.8-flash, 3.5-flash when busy or out of quota) when `GEMINI_API_KEY` is set, otherwise Anthropic (Haiku for extraction, Opus for qualifying). Set `LLM_PROVIDER` to force one.
 2. **Extract** - the extraction model fills named fields; every value needs a verbatim quote that is then checked against the page text.
 3. **Qualify** - the evidence map in `config/icp.yaml`:
 
