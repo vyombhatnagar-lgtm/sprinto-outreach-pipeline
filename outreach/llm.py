@@ -164,6 +164,9 @@ class GeminiLLM:
             try:
                 r = self.http.post(GEMINI_URL.format(model=model), json=body,
                                    headers={"x-goog-api-key": self.api_key}, timeout=self.timeout)
+                if r.status_code == 404 and attempt < len(self.chain):
+                    last_err = f"model {model} not available (404)"
+                    continue  # retired or not enabled for this key: try the next model straight away
                 if r.status_code not in GEMINI_RETRY_STATUS:
                     return r, model, attempt
                 last_err = f"HTTP {r.status_code} on {model}"

@@ -330,3 +330,17 @@ def test_gemini_skips_a_quota_exhausted_model_to_the_next_in_the_chain():
                     fallback_model="m2, m3", sleep=waits.append)
     llm.structured(system="s", user="u", output_model=_Scores)
     assert used == ["m1", "m2", "m3"] and waits == [1.0, 1.0]
+
+
+def test_gemini_skips_a_retired_model():
+    used = []
+
+    def handler(req):
+        used.append(req.url.path.split("/")[-1].split(":")[0])
+        if used[-1] == "old":
+            return httpx.Response(404, json={"error": {"message": "no longer available"}})
+        return httpx.Response(200, json=_ok_scores())
+    llm = GeminiLLM("k", "old", http=httpx.Client(transport=httpx.MockTransport(handler)),
+                    fallback_model="new", sleep=lambda s: None)
+    llm.structured(system="s", user="u", output_model=_Scores)
+    assert used == ["old", "new"]
