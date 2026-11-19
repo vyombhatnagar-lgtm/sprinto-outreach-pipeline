@@ -24,7 +24,8 @@ The recipient is **hardcoded** to `vyom_bhatnagar@pg27.mesaschool.co`, as the ca
    |---|---|---|---|---|---|
    | Already certified? | certifications_claimed, certification_status | /security, /trust | 1 | treat as not certified, flag | holds SOC 2 **and** ISO 27001 -> NO_GO |
    | B2B SaaS? | is_saas | /about, /product | 1 | hand to a human | not SaaS -> NO_GO |
-   | Right stage? | funding_stage, employee_count, enterprise_signals, compliance_job_postings | /careers (+ job board API), Google News, /pricing, /customers | 2 | rank lower, flag | - |
+   | Hiring for security / compliance? | compliance_job_postings, employee_count | /careers (+ job board API) | 1 | rank lower, flag | - |
+   | Right stage (Series A-C)? | funding_stage | Google News, /about, /customers | 1 | rank lower, flag | - |
 
    **Code** checks whether fields are filled; the model is never asked "do you know enough". At most 4 fetches beyond the homepage. Then the qualifying model (`OUTREACH_MODEL`, Opus) gives each criterion a status backed by profile fields (a "met" with no evidence is downgraded to unknown), and `outreach/icp.py::decide` computes **GO / GO_FLAGGED / NO_GO / MANUAL_REVIEW**.
 

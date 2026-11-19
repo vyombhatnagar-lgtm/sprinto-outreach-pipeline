@@ -36,12 +36,22 @@ evidence_map:
       if_unanswered: manual_review
       short_circuit: clearly not SaaS -> NO_GO, stop
 
+    # L4's "Right stage?" split in two (rec): enterprise_signals is NOT an answer here, because every
+    # homepage fills it, which used to close the question before careers/news were ever read.
+    - id: hiring
+      origin: [L4, case, rec]
+      question: Hiring for security / compliance (and how big)?
+      fields_any: [compliance_job_postings, employee_count]
+      ladder: [careers]            # L4: careers is rung one (ATS API when the board is hosted)
+      limit: 1
+      if_unanswered: qualify_lower_and_flag
+
     - id: stage
       origin: [L4, case, whiteboard]
-      question: Right stage?
-      fields_any: [funding_stage, employee_count, enterprise_signals, compliance_job_postings]
-      ladder: [careers, news, pricing, customers]   # L4: careers is rung one; whiteboard: Google News for funding
-      limit: 2
+      question: Right stage (Series A-C)?
+      fields_any: [funding_stage]
+      ladder: [news, about, customers]   # whiteboard: Google News for funding
+      limit: 1
       if_unanswered: qualify_lower_and_flag
 
 decision:

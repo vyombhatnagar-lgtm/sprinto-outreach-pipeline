@@ -54,10 +54,12 @@ def run(site=SITE, qual=None, max_fetches=None):
 def test_loop_fetches_named_pages_for_open_questions_only():
     out, sc = run()
     steps = out["qualification"].agent_steps
-    # homepage answered SaaS and stage (enterprise_signals), so only the certification question is open
-    assert [(s.question, s.page_kind) for s in steps] == [("certified", "security")]
+    # homepage answered SaaS; enterprise signals on the homepage must NOT close the hiring/stage questions
+    assert [(s.question, s.page_kind) for s in steps] == [("certified", "security"), ("hiring", "careers"),
+                                                          ("stage", "news")]
     assert steps[0].fields_filled == ["certifications_claimed", "certification_status"]
-    assert out["qualification"].decision == "GO"
+    assert steps[1].fields_filled == ["compliance_job_postings"]
+    assert out["qualification"].decision in ("GO", "GO_FLAGGED")
 
 
 def test_loop_respects_the_fetch_cap():
@@ -67,7 +69,7 @@ def test_loop_respects_the_fetch_cap():
     assert any("treated as not certified" in f for f in q.flags)
 
 
-def test_stage_question_walks_its_ladder_careers_first():
+def test_hiring_question_reads_careers_even_with_enterprise_signals():
     site = dict(SITE)
     home = site["https://acme.io"][1].replace("Enterprise plan includes SSO and SAML.", "")
     site["https://acme.io"] = (200, home)
@@ -83,7 +85,7 @@ def test_stage_question_walks_its_ladder_careers_first():
     profile, _ = ex.extract(res)
     out = Researcher(CARD, sc, ex, qualifier()).research(res, profile)
     kinds = [(s.question, s.page_kind) for s in out["qualification"].agent_steps]
-    assert ("stage", "careers") in kinds and kinds.index(("stage", "careers")) < len(kinds)
+    assert ("hiring", "careers") in kinds
     assert out["profile"].compliance_job_postings.value == "GRC Manager"
 
 
@@ -271,8 +273,8 @@ def test_advance_does_one_unit_per_call(tmp_path):
         stages.append(r["stage"])
         if r["done"]:
             break
-    assert stages == ["scrape", "extract", "research", "research", "qualify"]
-    assert store.read_step("acme.io", "qualify").output["qualification"]["decision"] == "GO"
+    assert stages == ["scrape", "extract", "research", "research", "research", "research", "qualify"]
+    assert store.read_step("acme.io", "qualify").output["qualification"]["decision"] in ("GO", "GO_FLAGGED")
 
 
 def test_busy_model_mid_loop_resumes_without_losing_state(tmp_path):
