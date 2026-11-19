@@ -15,6 +15,7 @@ from outreach.config import HARDCODED_RECIPIENT, PROMPT_VERSION, load_settings
 from outreach.domains import normalize_domain, normalize_domains
 from outreach.models import STEP_ORDER
 from outreach.pipeline import IMPLEMENTED_STEPS, build_pipeline
+from outreach.stats import summarize
 from outreach.trace import open_store
 
 app = FastAPI(title="Sprinto Outreach Pipeline", docs_url=None, redoc_url=None)
@@ -54,8 +55,13 @@ def gemini_models():
 @app.get("/", response_class=HTMLResponse)
 def home():
     s = load_settings()
-    runs = open_store(s).list_runs()
-    return web.home(runs, can_run=s.llm_ready, steps=IMPLEMENTED_STEPS)
+    store = open_store(s)
+    runs = store.list_runs()
+    try:
+        numbers = summarize(store.outcome_records())
+    except Exception:  # stats are decoration; never block the page
+        numbers = None
+    return web.home(runs, can_run=s.llm_ready, steps=IMPLEMENTED_STEPS, stats=numbers)
 
 
 class NewRun(BaseModel):

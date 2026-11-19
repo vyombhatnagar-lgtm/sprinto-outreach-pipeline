@@ -72,6 +72,18 @@ class TraceStore:
                 out.append(json.loads(m.read_text()))
         return out
 
+    def outcome_records(self, steps=("qualify", "poc", "draft", "send"), limit_runs: int = 50) -> List[StepRecord]:
+        """Records of the given steps across recent runs (for dashboard stats)."""
+        out: List[StepRecord] = []
+        for m in self.list_runs(limit=limit_runs):
+            base = self.runs_dir / m["run_id"]
+            for d in m.get("domains", []):
+                for s in steps:
+                    path = base / d / f"{STEP_ORDER.index(s) + 1:02d}_{s}.json"
+                    if path.exists():
+                        out.append(StepRecord.model_validate_json(path.read_text()))
+        return out
+
 
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS runs (
@@ -155,6 +167,14 @@ class PgTraceStore:
         with self._conn() as c:
             rows = c.all("SELECT manifest FROM runs ORDER BY created_at DESC LIMIT %s", (limit,))
         return [json.loads(r[0]) for r in rows]
+
+    def outcome_records(self, steps=("qualify", "poc", "draft", "send"), limit_runs: int = 50) -> List[StepRecord]:
+        """One query for the dashboard: these steps across the most recent runs."""
+        marks = ", ".join(["%s"] * len(steps))
+        with self._conn() as c:
+            rows = c.all(f"SELECT s.record FROM steps s JOIN (SELECT run_id FROM runs ORDER BY created_at DESC "
+                         f"LIMIT %s) r ON r.run_id = s.run_id WHERE s.step IN ({marks})", (limit_runs, *steps))
+        return [StepRecord.model_validate_json(r[0]) for r in rows]
 
 
 class _Conn:
