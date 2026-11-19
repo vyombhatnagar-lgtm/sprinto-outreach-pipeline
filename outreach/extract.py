@@ -61,7 +61,9 @@ For every field return:
 Fields:
 - company_name: the company's name.
 - one_liner: what the product does, in one sentence.
-- is_saas: "yes" if they sell cloud software by subscription, "no" if clearly not (services, hardware, marketplace), else null.
+- is_saas: "yes" if they sell cloud software by subscription. Open-source or free tiers do NOT make it "no": an
+  open-source product with a hosted cloud or paid plan is SaaS. "no" only if clearly not software sold as a service
+  (agency/services, hardware, marketplace, purely self-hosted with no paid cloud), else null.
 - funding_stage: latest funding round the site mentions (e.g. "Series B, $40M, 2025"), else null.
 - employee_count: headcount or range stated anywhere (e.g. "200+ employees"), else null.
 - certifications_claimed: compliance certifications they say they hold or are pursuing (SOC 2 Type I/II, ISO 27001, GDPR, HIPAA, PCI DSS...), including "in progress" wording. null if none are mentioned.
