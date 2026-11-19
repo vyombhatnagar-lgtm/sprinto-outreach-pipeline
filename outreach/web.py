@@ -534,7 +534,7 @@ def _scorecard(q: Dict[str, Any], q_rec) -> str:
     html = f'<ul class="crits">{"".join(known)}</ul>'
     if unknown:
         html += (f'<div class="unknowns"><span class="label">Not found on public pages</span>'
-                 f'<div>{escape(", ".join(unknown))}</div><div class="small muted">Counted as 0 points.</div></div>')
+                 f'<div>{escape(", ".join(unknown))}</div><div class="small muted">Most count as 0 points; the certification gap is assumed and flagged.</div></div>')
     notes = [f for f in q.get("flags", []) if not any(x in f for x in _NOISE)]
     if notes:
         html += '<ul class="notes">' + "".join(f"<li>{escape(f)}</li>" for f in notes) + "</ul>"
