@@ -150,6 +150,7 @@ class GeminiLLM:
         self.api_key = api_key
         self.http = http or httpx.Client(timeout=timeout)
         self.attempts, self.timeout, self.budget, self.backoff = attempts, timeout, budget, backoff
+        self.attempts = max(self.attempts, len(self.chain))  # give every model in the chain one try
         self._sleep = sleep or time.sleep
 
     def _post(self, body: Dict[str, Any]) -> Tuple[httpx.Response, str, int]:
