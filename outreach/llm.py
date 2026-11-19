@@ -106,7 +106,9 @@ def gemini_schema(model: Type[BaseModel]) -> Dict[str, Any]:
             return node
         if "$ref" in node:
             return walk(copy.deepcopy(defs[node["$ref"].split("/")[-1]]))
-        node = {k: v for k, v in node.items() if k not in ("title", "default")}
+        # drop schema metadata only; a *property* called "title" is data and must stay
+        node = {k: v for k, v in node.items()
+                if not (k in ("title", "default") and not isinstance(v, dict))}
         if "anyOf" in node:
             opts = node["anyOf"]
             non_null = [o for o in opts if o.get("type") != "null"]
@@ -115,7 +117,13 @@ def gemini_schema(model: Type[BaseModel]) -> Dict[str, Any]:
                 merged["type"] = [merged["type"], "null"]
                 rest = {k: v for k, v in node.items() if k != "anyOf"}
                 return {**rest, **merged}
-        return {k: walk(v) for k, v in node.items()}
+        out = {}
+        for k, v in node.items():
+            if k == "properties" and isinstance(v, dict):
+                out[k] = {name: walk(sub) for name, sub in v.items()}
+            else:
+                out[k] = walk(v)
+        return out
 
     return walk(raw)
 

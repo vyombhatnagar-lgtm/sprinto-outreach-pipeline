@@ -177,3 +177,11 @@ def test_unconfigured_gmail_keeps_the_draft_and_skips_send(tmp_path, monkeypatch
     pipe.run_domain("acme.io")
     assert store.read_step("acme.io", "send").status == "skipped"
     assert store.read_step("acme.io", "draft").status == "ok"
+
+
+def test_gemini_schema_keeps_a_field_named_title():
+    from outreach.llm import gemini_schema
+    from outreach.messaging import _Draft, _Pains
+    item = gemini_schema(_Pains)["properties"]["pains"]["items"]
+    assert "title" in item["properties"] and set(item["required"]) <= set(item["properties"])
+    assert "title" not in gemini_schema(_Draft)  # the model-level label is still dropped
